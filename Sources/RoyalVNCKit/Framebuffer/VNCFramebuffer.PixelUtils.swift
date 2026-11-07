@@ -161,18 +161,15 @@ private extension VNCFramebuffer.PixelUtils {
 		var value = (sourceColor >> sourceShift) & sourceMax
 
 		if sourceMax != destinationMax { // Color range conversion needed?
-			// Calculate channel depth
-			let sourceChannelDepth = sourceDepth / 3
-			let destinationChannelDepth = destinationDepth / 3
+			guard sourceMax > 0 else { return 0 }
 
-			if sourceChannelDepth > destinationChannelDepth { // Reduction: Shift the value right so only the most significant bits remain
-				value >>= sourceChannelDepth - destinationChannelDepth
-			} else { // Extension: Shift the value left so the remaining bits get the most significance
-				value <<= destinationChannelDepth - sourceChannelDepth
-			}
+			// Scale by the channel maximums, rounded: full intensity stays full (31 -> 255,
+			// not 248) and channels of different widths (5/6/5) each scale correctly.
+			// The depth is not used: depth / 3 is wrong whenever channels differ in width.
+			value = (value * destinationMax + sourceMax / 2) / sourceMax
 		}
 
-		return .init(value)
+		return .init(min(value, 255))
 	}
 }
 
