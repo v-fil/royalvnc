@@ -75,10 +75,18 @@ extension VNCProtocol.ZRLEEncoding {
 			self.tileBuffer = .init(repeating: 0, count: bufferLength)
 		}
 
+		// Most bytes a valid rectangle can decode from: per pixel at most a CPIXEL and a run
+		// length byte; per 64x64 tile a subencoding byte and a palette of up to 127 CPIXELs
+		let pixelCount = Int(rectangle.width) * Int(rectangle.height)
+		let tileCount = ((Int(rectangle.width) + 63) / 64) * ((Int(rectangle.height) + 63) / 64)
+		let maximumLength = pixelCount * (currentBytesPerPixel + 1) + tileCount * (1 + 127 * currentBytesPerPixel)
+
 		let compressedData = try await VNCProtocol.ZlibEncoding.retrieveCompressedData(connection: connection,
+																					   maximumUncompressedLength: maximumLength,
 																					   logger: logger)
 
-		let decompressedData = try zStream.decompressedData(compressedData: compressedData)
+		let decompressedData = try zStream.decompressedData(compressedData: compressedData,
+															maximumLength: maximumLength)
 
 		let stream = DataStream(data: decompressedData)
 

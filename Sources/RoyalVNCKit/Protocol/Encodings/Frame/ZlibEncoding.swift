@@ -17,14 +17,15 @@ extension VNCProtocol.ZlibEncoding {
                          framebuffer: VNCFramebuffer,
                          connection: NetworkConnectionReading,
                          logger: VNCLogger) async throws {
-		let compressedData = try await Self.retrieveCompressedData(connection: connection,
-																   logger: logger)
-
         let bytesPerPixel = framebuffer.sourceProperties.bytesPerPixel
 
 		let totalRAWBytes = rectangle.width <= 0 && rectangle.height <= 0
 			? UInt(0)
 			: UInt(Int(rectangle.width) * Int(rectangle.height) * bytesPerPixel)
+
+		let compressedData = try await Self.retrieveCompressedData(connection: connection,
+																   maximumUncompressedLength: Int(totalRAWBytes),
+																   logger: logger)
 
 		var data: Data
 
@@ -56,9 +57,16 @@ extension VNCProtocol.ZlibEncoding {
 }
 
 extension VNCProtocol.ZlibEncoding {
+	/// Reads a length-prefixed zlib block. Its length may not exceed what deflate needs at
+	/// worst for `maximumUncompressedLength` bytes (stored blocks plus the stream header).
 	static func retrieveCompressedData(connection: NetworkConnectionReading,
+									   maximumUncompressedLength: Int,
 									   logger: VNCLogger) async throws -> Data {
 		let compressedBytesToRead = Int(try await connection.readUInt32())
+
+		guard compressedBytesToRead <= maximumUncompressedLength + maximumUncompressedLength / 16 + 1024 else {
+			throw VNCError.protocol(.invalidData)
+		}
 
 		guard compressedBytesToRead > 0 else {
 			logger.logDebug("Nothing to Zlib download, skipping")
