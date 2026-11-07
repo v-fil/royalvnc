@@ -10,6 +10,8 @@ It depends on [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift), [zlib
 
 A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen Sharing support: encodings 1011 and 1001, SetServerScaling, and Apple's clipboard messages. The 1011 decoder in `Sources/CAppleMVS` is a C port of [noVNC-ARD](https://github.com/peetinc/noVNC-ARD) and, like it, is under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/) (see its file headers); everything else stays MIT.
 
+`VNCConnection.probeServer(hostname:port:)` reads the protocol version and security types a server offers, without logging in, so a client can choose one login type (via `allowedAuthenticationTypes`) and keep it.
+
 The decoder's unit tests (C, AddressSanitizer + UBSan) run with `make -C Tests/CAppleMVSTests test`.
 
 ## Supported Features
