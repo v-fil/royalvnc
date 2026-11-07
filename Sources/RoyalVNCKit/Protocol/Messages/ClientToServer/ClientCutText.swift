@@ -16,7 +16,9 @@ extension VNCProtocol {
 
 extension VNCProtocol.ClientCutText {
 	var data: Data {
-		var latin1TextData = text.data(using: Self.stringEncoding) ?? .init()
+		// Latin-1 as RFB says when the text fits it, otherwise UTF-8, which many servers
+		// expect anyway; dropping the text would be worse.
+		var latin1TextData = text.data(using: Self.stringEncoding) ?? Data(text.utf8)
 		var textLength = latin1TextData.count
 
 		if textLength > UInt32.max {

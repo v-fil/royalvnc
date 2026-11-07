@@ -12,6 +12,9 @@ extension VNCProtocol {
 
 		static let stringEncoding: String.Encoding = .isoLatin1
 
+		/// Longer text closes the session rather than being read.
+		static let maximumLength = 64 << 20
+
         let messageType: UInt8
         let text: String
 
@@ -28,8 +31,15 @@ extension VNCProtocol.ServerCutText {
 											 logger: logger)
 
 		if length >= 0 { // Standard Message
-			let text = try await connection.readString(encoding: Self.stringEncoding,
-													   length: .init(length))
+			guard length <= Self.maximumLength else {
+				throw VNCError.protocol(.invalidData)
+			}
+
+			let data = length > 0
+				? try await connection.readBuffered(length: length)
+				: Data()
+
+			let text = Self.text(from: data)
 
 			return .init(messageType: Self.messageType,
 						 text: text,
@@ -49,6 +59,16 @@ extension VNCProtocol.ServerCutText {
 }
 
 private extension VNCProtocol.ServerCutText {
+	/// RFB says Latin-1, but many servers send UTF-8: taken as UTF-8 when the bytes are valid
+	/// UTF-8. Ends at the first zero byte.
+	static func text(from data: Data) -> String {
+		let bytes = data.prefix(while: { $0 != 0 })
+
+		return String(data: bytes, encoding: .utf8)
+			?? String(data: bytes, encoding: Self.stringEncoding)
+			?? ""
+	}
+
 	static func receiveLength(connection: NetworkConnectionReading,
 							  logger: VNCLogger) async throws -> Int {
 		let lengthDataLength = MemoryLayout<UInt32>.size
