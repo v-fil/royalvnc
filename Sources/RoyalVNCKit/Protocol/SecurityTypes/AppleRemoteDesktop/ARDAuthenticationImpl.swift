@@ -48,64 +48,20 @@ extension VNCProtocol.ARDAuthentication {
 
             guard randomCredsDataSuccess else { return nil }
 
-			let usernameLength = username.utf8.count
-			let passwordLength = password.utf8.count
+			// Each field is a C string in 64 bytes: at most 63 UTF-8 bytes, then a zero.
+			// Cut by bytes, not characters: a character can take up to 4 bytes.
+			let maxLength = credArraySize / 2 - 1
 
-			let maxLength = 63
+			let usernameBytes = Array(username.utf8.prefix(maxLength))
+			let passwordBytes = Array(password.utf8.prefix(maxLength))
 
-			// Cap length at 63 as index is 0
-			let cappedUsername = usernameLength > maxLength
-				? String(username[username.startIndex..<username.index(username.startIndex, offsetBy: maxLength)])
-				: username
+			creds.replaceSubrange(0..<usernameBytes.count, with: usernameBytes)
+			creds[usernameBytes.count] = 0
 
-			let cappedUsernameLength = cappedUsername.utf8.count
+			let passwordStart = credArraySize / 2
 
-			let cappedPassword = passwordLength > maxLength
-				? String(password[password.startIndex..<password.index(password.startIndex, offsetBy: maxLength)])
-				: password
-
-			let cappedPasswordLength = cappedPassword.utf8.count
-
-            // Convert username and password strings into C strings
-            let usernameC = cappedUsername.utf8CString
-            let passwordC = cappedPassword.utf8CString
-
-			// Merge username and password into single array
-			let fillCredsSuccess = creds.withUnsafeMutableBytes {
-				guard let credsBytes = $0.baseAddress else { return false }
-
-				let copyUsernameSuccess = usernameC.withUnsafeBytes { usernameCBytesPtr in
-					guard let usernameCBytes = usernameCBytesPtr.baseAddress else { return false }
-
-					credsBytes.copyMemory(from: usernameCBytes,
-										  byteCount: cappedUsernameLength)
-
-					return true
-				}
-
-				guard copyUsernameSuccess else { return false }
-
-				let copyPasswordSuccess = passwordC.withUnsafeBytes { passwordCBytesPtr in
-					guard let passwordCBytes = passwordCBytesPtr.baseAddress else { return false }
-
-					let credsBytesStartingAtPassword = credsBytes.advanced(by: credArraySize / 2)
-
-					credsBytesStartingAtPassword.copyMemory(from: passwordCBytes,
-															byteCount: cappedPasswordLength)
-
-					return true
-				}
-
-				guard copyPasswordSuccess else { return false }
-
-				return true
-			}
-
-			guard fillCredsSuccess else { return nil }
-
-			// Add null bytes to indicate end of c string
-			creds[cappedUsernameLength] = 0
-			creds[(credArraySize / 2) + cappedPasswordLength] = 0
+			creds.replaceSubrange(passwordStart..<passwordStart + passwordBytes.count, with: passwordBytes)
+			creds[passwordStart + passwordBytes.count] = 0
 
 			guard let cipherText = creds.aes128ECBEncrypted(withKey: secretHash) else {
 				return nil
