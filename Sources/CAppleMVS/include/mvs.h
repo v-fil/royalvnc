@@ -17,8 +17,8 @@
  * for tile copies); mvs_blit() converts a region of it to the client's pixel
  * format. One decoder per connection; not thread-safe.
  */
-#ifndef YAVNC_MVS_H
-#define YAVNC_MVS_H
+#ifndef RVNC_APPLE_MVS_H
+#define RVNC_APPLE_MVS_H
 
 #include <stddef.h>
 #include <stdint.h>

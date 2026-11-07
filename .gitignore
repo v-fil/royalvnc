@@ -92,3 +92,7 @@ iOSInjectionProject/
 /Debug.xcconfig
 /Release.xcconfig
 *.profraw
+
+# Decoder test build products
+Tests/CAppleMVSTests/mvs_tests
+Tests/CAppleMVSTests/mvs_tests.dSYM/
