@@ -56,6 +56,16 @@ extension VNCFramebuffer.PixelUtils {
 										  pixelDataOffset: sourcePixelDataOffset,
 										  bitsPerPixel: sourceProperties.bitsPerPixel)
 
+		return destinationPixelWith(sourcePixelValue: sourcePixelValue,
+									sourceProperties: sourceProperties,
+									destinationProperties: destinationProperties,
+									colorMap: colorMap)
+	}
+
+	static func destinationPixelWith(sourcePixelValue: Int,
+									 sourceProperties: VNCFramebuffer.Properties,
+									 destinationProperties: VNCFramebuffer.Properties,
+									 colorMap: VNCFramebuffer.ColorMap?) -> VNCFramebuffer.LocalPixel {
 		let destinationRed = channelValue(sourceColor: sourcePixelValue,
 										  colorChannel: .red,
 										  colorMap: colorMap,

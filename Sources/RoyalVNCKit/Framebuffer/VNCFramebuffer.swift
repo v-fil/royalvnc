@@ -98,6 +98,11 @@ public final class VNCFramebuffer: NSObjectOrAnyObject {
 #endif
     
     private(set) var colorMap: ColorMap?
+
+	/// For 8 and 16bpp sources: the 32-bit destination pixel (alpha included) for every
+	/// source value, so converting a pixel is one table read.
+	/// Rebuilt when the colour map changes.
+	private lazy var conversionTable: [UInt32]? = makeConversionTable()
     
     // MARK: - Private Properties
     private var isBatchingUpdates = false
@@ -337,6 +342,8 @@ extension VNCFramebuffer {
 		let colorMap = ColorMap(entries: entries)
 
 		self.colorMap = colorMap
+
+		conversionTable = makeConversionTable()
 	}
 
 	func decodeCursor(image: inout Data,
@@ -477,6 +484,34 @@ extension VNCFramebuffer {
     }
 }
 
+// MARK: - Conversion Table
+private extension VNCFramebuffer {
+	func makeConversionTable() -> [UInt32]? {
+		let sourceBitsPerPixel = sourceProperties.bitsPerPixel
+
+		guard needsColorConversion,
+			  sourceBitsPerPixel == 8 || sourceBitsPerPixel == 16,
+			  destinationProperties.bytesPerPixel == 4 else {
+			return nil
+		}
+
+		let alpha = UInt32(destinationProperties.alphaMax) << 24
+		let sourceProperties = self.sourceProperties
+		let destinationProperties = self.destinationProperties
+		let colorMap = self.colorMap
+
+		// Little-endian BGRA, the layout the slow path writes byte by byte
+		return (0..<(1 << sourceBitsPerPixel)).map { value in
+			let pixel = PixelUtils.destinationPixelWith(sourcePixelValue: value,
+														sourceProperties: sourceProperties,
+														destinationProperties: destinationProperties,
+														colorMap: colorMap)
+
+			return UInt32(pixel.blue) | UInt32(pixel.green) << 8 | UInt32(pixel.red) << 16 | alpha
+		}
+	}
+}
+
 // MARK: - Update Framebuffer
 private extension VNCFramebuffer {
 	/// `data` is in the server's pixel format, or in the framebuffer's own format when
@@ -504,6 +539,7 @@ private extension VNCFramebuffer {
 		let destinationBytesPerPixel = destinationProperties.bytesPerPixel
 
 		let needsColorConversion = isInternalFormat ? false : self.needsColorConversion
+		let conversionTable = needsColorConversion ? self.conversionTable : nil
 		let logger = self.logger
 
 		let fixedAlpha = UInt8(destinationProperties.alphaMax)
@@ -552,6 +588,24 @@ private extension VNCFramebuffer {
 
                         idx += destinationBytesPerPixel
                     }
+				} else if let conversionTable { // 8 and 16bpp: one table read per pixel
+					let target = targetBase.advanced(by: destinationRowOffset + destinationOffsetOf(column: regionX))
+						.assumingMemoryBound(to: UInt32.self)
+
+					conversionTable.withUnsafeBufferPointer { table in
+						if sourceBytesPerPixel == 2 {
+							for column in 0..<regionWidth {
+								let value = sourcePixelDataPtr.loadUnaligned(fromByteOffset: sourceRowOffset + column * 2,
+																			 as: UInt16.self)
+
+								target[column] = table[Int(value)]
+							}
+						} else {
+							for column in 0..<regionWidth {
+								target[column] = table[Int(sourcePixelDataPtr[sourceRowOffset + column])]
+							}
+						}
+					}
 				} else { // Slow Path
 					for column in 0..<regionWidth {
 						let sourceColumnOffset = sourceOffsetOf(column: column)
