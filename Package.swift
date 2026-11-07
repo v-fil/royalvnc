@@ -60,11 +60,20 @@ let package = Package(
             name: "RoyalVNCKitC"
         ),
 
+        // Modular exponentiation for the Diffie-Hellman logins. Optimised in debug builds too.
+        .target(
+            name: "CModExp",
+            cSettings: [
+                .unsafeFlags([ "-O2" ])
+            ]
+        ),
+
         .target(
             name: "RoyalVNCKit",
 
             dependencies: [
                 "RoyalVNCKitC",
+                "CModExp",
                 .byName(name: d3desTarget.name),
                 .byName(name: zTarget.name),
                 .byName(name: "CryptoSwift"),

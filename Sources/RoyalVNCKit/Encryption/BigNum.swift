@@ -6,6 +6,7 @@ import Foundation
 
 // MARK: - CryptoSwift Implementation
 @_implementationOnly import CryptoSwift
+@_implementationOnly import CModExp
 
 final class BigNum {
     private var bigInt: BigUInteger
@@ -67,20 +68,48 @@ extension BigNum {
         return true
     }
 
+    /// y = g^x mod p. An odd p of at most 512 bytes goes to the C implementation (CryptoSwift
+    /// takes many seconds for 2048 bits in a debug build); anything else to CryptoSwift.
     static func modExp(y: BigNum,
                        g: BigNum,
                        x: BigNum,
                        p: BigNum) -> Bool {
-        y.bigInt = g.bigInt.power(x.bigInt, modulus: p.bigInt)
-        
+        y.bigInt = g.power(exponent: x, modulus: p).bigInt
+
         return true
     }
-    
+
     func power(exponent: BigNum, modulus: BigNum) -> BigNum {
+        if let result = Self.fastPower(base: bigInt, exponent: exponent.bigInt, modulus: modulus.bigInt) {
+            return .init(result)
+        }
+
         let result = bigInt.power(exponent.bigInt,
                                   modulus: modulus.bigInt)
-        
+
         return .init(result)
+    }
+
+    private static func fastPower(base: BigUInteger, exponent: BigUInteger, modulus: BigUInteger) -> BigUInteger? {
+        guard modulus > 1, modulus[bitAt: 0] else { return nil }
+
+        let reducedBase = base < modulus ? base : base % modulus
+        let modulusBytes = [UInt8](modulus.serialize())
+        let baseBytes = [UInt8](reducedBase.serialize())
+        let exponentBytes = [UInt8](exponent.serialize())
+
+        guard modulusBytes.count <= Int(RVNC_MODEXP_MAX_BYTES) else { return nil }
+
+        var out = [UInt8](repeating: 0, count: modulusBytes.count)
+
+        let status = rvnc_modexp(baseBytes, baseBytes.count,
+                                 exponentBytes, exponentBytes.count,
+                                 modulusBytes, modulusBytes.count,
+                                 &out)
+
+        guard status == 0 else { return nil }
+
+        return BigUInteger(Data(out))
     }
 
     func bigEndianData() -> Data? {
