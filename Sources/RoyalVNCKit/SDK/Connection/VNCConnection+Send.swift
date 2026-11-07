@@ -60,11 +60,9 @@ extension VNCConnection {
 
 private extension VNCConnection {
 	func send() async throws {
-		guard !state.disconnectRequested,
-              connection.isReady,
-			  let message = clientToServerMessageQueue.dequeue() else {
-			try await Task.sleep(seconds: 0.01)
-
+		guard let message = await clientToServerMessageQueue.next(),
+			  !state.disconnectRequested,
+			  connection.isReady else {
 			return
 		}
 

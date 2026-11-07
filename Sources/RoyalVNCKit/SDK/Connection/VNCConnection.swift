@@ -66,7 +66,7 @@ public final class VNCConnection: NSObjectOrAnyObject {
 	let clipboard: VNCClipboard
 	let clipboardMonitor: VNCClipboardMonitor
 
-	var clientToServerMessageQueue = Queue<VNCSendableMessage>()
+	let clientToServerMessageQueue = Queue<VNCSendableMessage>()
 
     var mouseButtonState: VNCProtocol.MousePointerButton = [ ]
 
@@ -289,6 +289,7 @@ extension VNCConnection {
 		guard !state.disconnectRequested else { return }
 
 		state.disconnectRequested = true
+		clientToServerMessageQueue.close()
 		updateConnectionState(.disconnecting)
 
 		connection.setStatusUpdateHandler(nil)
