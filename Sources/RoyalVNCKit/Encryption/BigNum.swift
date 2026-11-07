@@ -34,6 +34,15 @@ extension BigNum {
 }
 
 extension BigNum {
+    /// True for an odd prime p > 3 and 1 < self < p - 1. A Diffie-Hellman peer key or
+    /// generator of 0, 1 or p - 1 makes the shared secret independent of our private key.
+    func isValidDiffieHellmanPeerKey(prime: BigNum) -> Bool {
+        prime.bigInt > 3 &&
+        prime.bigInt % 2 == 1 &&
+        bigInt > 1 &&
+        bigInt < prime.bigInt - 1
+    }
+
     var isZero: Bool {
         let isIt = self.bigInt == 0
         
