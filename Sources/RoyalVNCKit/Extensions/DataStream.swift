@@ -21,11 +21,9 @@ extension DataStream: AnyStream {
 		let currentOffset = self.offset
 		let newOffset = currentOffset + length
 
-		#if DEBUG
 		guard newOffset <= dataLength else {
 			throw VNCError.protocol(.noData)
 		}
-		#endif
 
 		let subData = data.subdata(in: currentOffset..<newOffset)
 

@@ -512,6 +512,12 @@ private extension VNCFramebuffer {
 		let sourceColumnLength = regionWidth * sourceBytesPerPixel
 		let destinationColumnLength = regionWidth * destinationBytesPerPixel
 
+		guard data.count >= sourceColumnLength * regionHeight else {
+			logger.logError("Pixel data too short for region \(region): \(data.count) bytes")
+
+			return
+		}
+
         let targetBase = surfaceAddress
 
 		data.withUnsafeBytes { sourcePixelDataPtr in
@@ -586,11 +592,9 @@ private extension VNCFramebuffer {
 		let sourceBytesPerPixel = sourceProperties.bytesPerPixel
 		let destinationBytesPerPixel = destinationProperties.bytesPerPixel
 
-#if DEBUG
         guard pixelData.count == sourceBytesPerPixel else {
             return
         }
-#endif
 
         let fixedAlpha = UInt8(destinationProperties.alphaMax)
 

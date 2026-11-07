@@ -248,6 +248,10 @@ private extension VNCProtocol.ZRLEEncoding {
 
 					let indexInPalette = (Int(encoded) >> shift) & mask
 
+					guard indexInPalette < paletteSize else {
+						throw VNCError.protocol(.zrlePaletteIndexOverflow(paletteIndex: indexInPalette, paletteSize: paletteSize))
+					}
+
 					let sourceStartIndex = indexInPalette * bytesPerPixel
 
 					guard let target = tileBufferPtr.baseAddress?.advanced(by: offset).assumingMemoryBound(to: UInt8.self) else {
