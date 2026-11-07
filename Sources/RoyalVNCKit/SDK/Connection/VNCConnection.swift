@@ -27,6 +27,12 @@ public final class VNCConnection: NSObjectOrAnyObject {
 #endif
 	public weak var delegate: VNCConnectionDelegate?
 
+	public weak var sessionDelegate: VNCConnectionSessionDelegate?
+
+	/// Hand the server's clipboard text to `sessionDelegate`. On Apple servers this also
+	/// asks for pasteboard change notices. Set before `connect()`.
+	public var forwardsServerClipboard = false
+
 #if canImport(ObjectiveC)
 	@objc
 #endif
@@ -50,6 +56,9 @@ public final class VNCConnection: NSObjectOrAnyObject {
 
 	private let sharedZStream: ZlibStream
     private let sharedZRLEZStream: ZlibStream
+    private let appleGreyZStream: ZlibStream
+
+    let appleMVSEncoding = VNCProtocol.AppleMVSEncoding()
 
 	// MARK: - Internal Properties
     let taskPriority = TaskPriority.high
@@ -70,17 +79,19 @@ public final class VNCConnection: NSObjectOrAnyObject {
 
     var mouseButtonState: VNCProtocol.MousePointerButton = [ ]
 
-    lazy var connection: some NetworkConnection = {
+    // NOTE: To test SocketNetworkConnection on Darwin (macOS, iOS, etc.), comment out the the #if
+#if canImport(Network)
+    typealias BaseNetworkConnection = NWConnection
+#else
+    typealias BaseNetworkConnection = SocketNetworkConnection
+#endif
+
+    lazy var connection: CountingNetworkConnection<BaseNetworkConnection> = {
         let connectionSettings = NetworkConnectionSettings(connectionTimeout: 15,
                                                            host: settings.hostname,
                                                            port: settings.port)
 
-        // NOTE: To test SocketNetworkConnection on Darwin (macOS, iOS, etc.), comment out the the #if
-#if canImport(Network)
-        let connection = NWConnection(settings: connectionSettings)
-#else
-		let connection = SocketNetworkConnection(settings: connectionSettings)
-#endif
+        let connection = CountingNetworkConnection<BaseNetworkConnection>(settings: connectionSettings)
 
         connection.setStatusUpdateHandler(connectionStatusDidChange)
 
@@ -107,6 +118,8 @@ public final class VNCConnection: NSObjectOrAnyObject {
 			VNCFrameEncodingType.coRRE.rawValue: VNCProtocol.RREEncoding(),
 			VNCFrameEncodingType.rre.rawValue: VNCProtocol.RREEncoding(),
 			VNCFrameEncodingType.raw.rawValue: rawEncoding,
+			VNCFrameEncodingType.appleGrey.rawValue: VNCProtocol.AppleGreyEncoding(zStream: appleGreyZStream),
+			VNCFrameEncodingType.appleMVS.rawValue: appleMVSEncoding,
 
 			// Pseudo Encodings
 			VNCPseudoEncodingType.lastRect.rawValue: VNCProtocol.LastRectEncoding(),
@@ -139,7 +152,8 @@ public final class VNCConnection: NSObjectOrAnyObject {
 		]
 
 		// Frame Encodings (Customizable)
-		var customizedFrameEncodings = settings.frameEncodings.map({ $0.rawValue })
+		let frameEncodings = state.withScaling { _ in state.frameEncodings } ?? settings.frameEncodings
+		var customizedFrameEncodings = frameEncodings.map({ $0.rawValue })
 
 		// ZRLE decodes only some pixel formats (see supportsPixelFormat)
 		if let pixelFormat = state.pixelFormat,
@@ -204,6 +218,7 @@ public final class VNCConnection: NSObjectOrAnyObject {
         
         self.sharedZStream = .init()
         self.sharedZRLEZStream = .init()
+        self.appleGreyZStream = .init()
 
         let clipboard = VNCClipboard()
 
@@ -374,6 +389,13 @@ private extension VNCConnection {
 			}
 
 			updateConnectionState(.connected)
+
+			if state.isAppleRemoteDesktop,
+			   forwardsServerClipboard || settings.isClipboardRedirectionEnabled {
+				enqueueClientToServerMessage(AppleClientMessage.viewerInfo)
+				enqueueClientToServerMessage(AppleClientMessage.setModeControl)
+				enqueueClientToServerMessage(AppleClientMessage.autoPasteboardStart)
+			}
 
 			startReceiveLoop()
 			startSendLoop()

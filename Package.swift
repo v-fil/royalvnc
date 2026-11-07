@@ -68,11 +68,17 @@ let package = Package(
             ]
         ),
 
+        // Apple encoding 1011 decoder (MPL 2.0, see its file headers)
+        .target(
+            name: "CAppleMVS"
+        ),
+
         .target(
             name: "RoyalVNCKit",
 
             dependencies: [
                 "RoyalVNCKitC",
+                "CAppleMVS",
                 "CModExp",
                 .byName(name: d3desTarget.name),
                 .byName(name: zTarget.name),

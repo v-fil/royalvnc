@@ -4,6 +4,8 @@ import FoundationEssentials
 import Foundation
 #endif
 
+import Dispatch
+
 // MARK: - Server to Client Messages
 extension VNCConnection {
 	func startReceiveLoop() {
@@ -35,6 +37,13 @@ private extension VNCConnection {
 
 		let serverToClientMessage = try await VNCProtocol.ServerToClientMessage.receive(connection: connection)
 
+		let start = DispatchTime.now().uptimeNanoseconds
+
+		defer {
+			let elapsed = DispatchTime.now().uptimeNanoseconds - start
+			state.addSecondsHandlingMessages(Double(elapsed) / 1e9)
+		}
+
 		try await didReceive(messageType: serverToClientMessage.messageType)
 	}
 
@@ -55,6 +64,12 @@ private extension VNCConnection {
 			case VNCProtocol.EndOfContinuousUpdates.messageType:
 				try await handleEndOfContinuousUpdatesMessage()
 
+			case VNCProtocol.AppleMiscStatus.messageType where state.isAppleRemoteDesktop:
+				try await handleAppleMiscStatusMessage()
+
+			case VNCProtocol.ApplePasteboardContents.messageType where state.isAppleRemoteDesktop:
+				try await handleApplePasteboardContentsMessage()
+
 			default:
 				throw VNCError.protocol(.unsupportedServerToClientMessage(messageType: messageType))
 		}
@@ -68,11 +83,25 @@ private extension VNCConnection {
 		logger.logDebug("Receiving Framebuffer Update")
 
 		let framebufferUpdate = try await VNCProtocol.FramebufferUpdate.receive(connection: connection,
-																				framebuffer: framebuffer,
+																				currentFramebuffer: { [weak self] in self?.framebuffer },
 																				encodings: encodings,
 																				logger: logger)
 
 		logger.logDebug("Received Framebuffer Update: \(framebufferUpdate)")
+
+		let currentFramebuffer = self.framebuffer ?? framebuffer
+
+		if noteFinishedUpdateForRescale(framebufferUpdate.rectangles,
+										framebufferSize: currentFramebuffer.size),
+		   let sessionDelegate {
+			let rectangles = framebufferUpdate.rectangles.map {
+				VNCUpdatedRectangle(region: $0.region, encodingType: $0.encodingType)
+			}
+
+			sessionDelegate.connection(self,
+									   didFinishFramebufferUpdate: currentFramebuffer,
+									   rectangles: rectangles)
+		}
 
 		/*
 		// Write out the framebuffer for testing purposes
@@ -107,9 +136,46 @@ private extension VNCConnection {
 
 		logger.logDebug("Received Clipboard Text from Server")
 
+		deliverServerClipboardText(text)
+	}
+
+	func deliverServerClipboardText(_ text: String) {
+		if forwardsServerClipboard {
+			sessionDelegate?.connection(self, didReceiveClipboardText: text)
+		}
+
 		guard settings.isClipboardRedirectionEnabled else { return }
 
 		clipboard.text = text
+	}
+
+	func handleAppleMiscStatusMessage() async throws {
+		let status = try await VNCProtocol.AppleMiscStatus.receive(connection: connection)
+
+		guard status.isPasteboardChanged,
+			  forwardsServerClipboard || settings.isClipboardRedirectionEnabled else { return }
+
+		state.isApplePasteboardFetchPending = true
+
+		enqueueClientToServerMessage(AppleClientMessage.pasteboardFetch)
+	}
+
+	func handleApplePasteboardContentsMessage() async throws {
+		let contents = try await VNCProtocol.ApplePasteboardContents.receive(connection: connection)
+
+		// The server can trigger a fetch at any time with a change notice; contents that
+		// arrive without one are not taken.
+		guard state.isApplePasteboardFetchPending else {
+			logger.logDebug("Ignoring Apple pasteboard contents that were not asked for")
+
+			return
+		}
+
+		state.isApplePasteboardFetchPending = false
+
+		guard let text = contents.text else { return }
+
+		deliverServerClipboardText(text)
 	}
 
 	func handleBellMessage() async throws {

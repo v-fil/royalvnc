@@ -13,6 +13,15 @@ extension NWConnection: NetworkConnection {
         let tcpOptions = NWProtocolTCP.Options()
         tcpOptions.connectionTimeout = settings.connectionTimeout
 
+        // An idle screen sends nothing, so without probes a dead link is never noticed.
+        // Probe after 5 s of silence, every 2 s, give up after 3; and drop the connection
+        // when sent data stays unacknowledged for 10 s.
+        tcpOptions.enableKeepalive = true
+        tcpOptions.keepaliveIdle = 5
+        tcpOptions.keepaliveInterval = 2
+        tcpOptions.keepaliveCount = 3
+        tcpOptions.connectionDropTime = 10
+
         let connectionParameters = NWParameters(tls: nil,
                                                 tcp: tcpOptions)
 

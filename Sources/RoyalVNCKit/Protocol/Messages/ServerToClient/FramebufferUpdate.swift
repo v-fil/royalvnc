@@ -14,10 +14,16 @@ extension VNCProtocol {
 }
 
 extension VNCProtocol.FramebufferUpdate {
+	/// `currentFramebuffer` gives the framebuffer to decode into. A pseudo-encoding such as
+	/// DesktopSize can replace it part way through the update.
 	static func receive(connection: NetworkConnectionReading,
-						framebuffer: VNCFramebuffer,
+						currentFramebuffer: () -> VNCFramebuffer?,
 						encodings: Encodings,
 						logger: VNCLogger) async throws -> Self {
+		guard var framebuffer = currentFramebuffer() else {
+			throw VNCError.protocol(.framebufferUpdateReceivedWithoutFramebuffer)
+		}
+
 		try await connection.readPadding()
 		let numberOfRectangles = try await connection.readUInt16()
 
@@ -32,7 +38,7 @@ extension VNCProtocol.FramebufferUpdate {
 		var rectangles = [VNCProtocol.Rectangle]()
         
         framebuffer.beginBatchUpdates()
-        
+
         defer {
             framebuffer.endBatchUpdates()
         }
@@ -77,6 +83,12 @@ extension VNCProtocol.FramebufferUpdate {
 															   framebuffer: framebuffer,
 															   connection: connection,
 															   logger: logger)
+
+					if let replaced = currentFramebuffer(), replaced !== framebuffer {
+						framebuffer.endBatchUpdates()
+						framebuffer = replaced
+						framebuffer.beginBatchUpdates()
+					}
 
 					logger.logDebug("Finished decoding pseudo rectangle \(idx + 1)/\(numberOfRectangles)")
 				} else {

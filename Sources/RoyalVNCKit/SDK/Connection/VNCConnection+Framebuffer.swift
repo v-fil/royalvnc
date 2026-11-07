@@ -28,6 +28,8 @@ extension VNCConnection: VNCFramebufferDelegate {
 		recreateFramebuffer(size: newSize,
 							screens: newScreens,
 							pixelFormat: framebuffer.sourcePixelFormat)
+
+		serverScreenSizeDidChange(newSize)
 	}
 }
 
@@ -50,6 +52,11 @@ extension VNCConnection {
 
 			return
 		}
+
+        // Shown until the server's next full frame replaces it.
+        if let oldFramebuffer = self.framebuffer {
+            newFramebuffer.copyPicture(from: oldFramebuffer)
+        }
 
         self.framebuffer?.delegate = nil
 

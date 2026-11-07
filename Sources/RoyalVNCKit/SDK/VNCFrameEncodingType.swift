@@ -17,6 +17,8 @@ public enum _ObjC_VNCFrameEncodingType: Int64 {
 	case zlib = 6
 	case tight = 7
 	case zrle = 16
+	case appleGrey = 1001
+	case appleMVS = 1011
 }
 
 public enum VNCFrameEncodingType: VNCEncodingType {
@@ -28,6 +30,8 @@ public enum VNCFrameEncodingType: VNCEncodingType {
 	case zlib = 6
 	case tight = 7
 	case zrle = 16
+	case appleGrey = 1001
+	case appleMVS = 1011
 }
 
 extension VNCFrameEncodingType: CustomStringConvertible {
@@ -49,6 +53,10 @@ extension VNCFrameEncodingType: CustomStringConvertible {
 				"Tight"
 			case .zrle:
 				"ZRLE"
+			case .appleGrey:
+				"Apple Greyscale"
+			case .appleMVS:
+				"Apple MVS"
 		}
 	}
 }
@@ -134,6 +142,10 @@ extension VNCFrameEncodingType {
 				.tight
 			case .zrle:
 				.zrle
+			case .appleGrey:
+				.appleGrey
+			case .appleMVS:
+				.appleMVS
 		}
 	}
 }

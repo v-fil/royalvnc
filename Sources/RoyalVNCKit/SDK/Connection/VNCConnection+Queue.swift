@@ -73,8 +73,14 @@ extension VNCConnection {
         var normalizedX = x
         var normalizedY = y
 
-        let framebufferWidth = framebuffer?.size.width ?? 0
-        let framebufferHeight = framebuffer?.size.height ?? 0
+        var framebufferWidth = framebuffer?.size.width ?? 0
+        var framebufferHeight = framebuffer?.size.height ?? 0
+
+        // Apple servers take native pixels even while their screen is scaled
+        if state.isAppleRemoteDesktop {
+            framebufferWidth = max(framebufferWidth, state.framebufferWidth)
+            framebufferHeight = max(framebufferHeight, state.framebufferHeight)
+        }
 
         if normalizedY > framebufferHeight {
             normalizedY = framebufferHeight

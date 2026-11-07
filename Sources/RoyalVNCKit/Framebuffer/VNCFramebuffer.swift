@@ -302,6 +302,53 @@ extension VNCFramebuffer {
 		unlockSurfaceReadWrite()
 	}
 
+	/// Like `update(region:data:)` with `data` already in the framebuffer's own format
+	/// (32 bits per pixel, bytes B, G, R, A).
+	func update(region: VNCRegion,
+				internalData data: inout Data) {
+		guard isValidRegion(region) else {
+			logger.logError("Invalid region: \(region)")
+
+			return
+		}
+
+		lockSurfaceReadWrite()
+		updatePixelBufferWithData(&data, forRegion: region, isInternalFormat: true)
+		unlockSurfaceReadWrite()
+	}
+
+	/// Runs `body` with the surface locked for writing: its base address and bytes per row.
+	/// Pixels are 32 bits, bytes B, G, R, A. Call `didUpdate(region:)` afterwards.
+	func withWritableSurface<Result>(_ body: (UnsafeMutableRawPointer, Int) throws -> Result) rethrows -> Result {
+		lockSurfaceReadWrite()
+		defer { unlockSurfaceReadWrite() }
+
+		return try body(surfaceAddress, destinationProperties.bytesPerRow)
+	}
+
+	/// Copies the top-left part both framebuffers have in common from `other`.
+	func copyPicture(from other: VNCFramebuffer) {
+		let rows = min(height, other.height)
+		let rowBytes = min(width, other.width) * destinationProperties.bytesPerPixel
+
+		guard rows > 0, rowBytes > 0 else { return }
+
+		let sourceBytesPerRow = other.destinationProperties.bytesPerRow
+		let destinationBytesPerRow = destinationProperties.bytesPerRow
+
+		other.lockSurfaceReadOnly()
+		lockSurfaceReadWrite()
+
+		for row in 0..<rows {
+			surfaceAddress.advanced(by: row * destinationBytesPerRow)
+				.copyMemory(from: other.surfaceAddress.advanced(by: row * sourceBytesPerRow),
+							byteCount: rowBytes)
+		}
+
+		unlockSurfaceReadWrite()
+		other.unlockSurfaceReadOnly()
+	}
+
 	func copy(region sourceRegion: VNCRegion,
 			  to destinationRegion: VNCRegion) {
 		logger.logDebug("Framebuffer Copy Region \(sourceRegion) to \(destinationRegion)")
