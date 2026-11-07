@@ -14,6 +14,9 @@ extension VNCProtocol {
 		let prime: Data
 		let peerKey: Data
 
+		/// DH key sizes accepted from the server, in bytes (512 to 4096 bits).
+		static let allowedKeySizes = 64...512
+
 		fileprivate init?(generator: Data,
 						  keySize: UInt16,
 						  prime: Data,
@@ -40,6 +43,13 @@ extension VNCProtocol.ARDAuthentication {
 	static func receive(connection: NetworkConnectionReading) async throws -> Self {
 		let generator = try await connection.readBuffered(length: 2)
 		let keySize = try await connection.readUInt16()
+
+		// Apple sends 128 bytes. A server-chosen size of up to 65535 bytes would mean
+		// modular exponentiations that run for hours.
+		guard Self.allowedKeySizes.contains(Int(keySize)) else {
+			throw VNCError.protocol(.invalidData)
+		}
+
 		let prime = try await connection.readBuffered(length: .init(keySize))
 		let peerKey = try await connection.readBuffered(length: .init(keySize))
 
