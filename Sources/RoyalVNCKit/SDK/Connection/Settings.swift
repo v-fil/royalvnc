@@ -56,6 +56,23 @@ public extension VNCConnection {
 
 		public let frameEncodings: [VNCFrameEncodingType]
 
+		/// Login types the client may use, in order of preference. The first one the server
+		/// offers is chosen; if it offers none of them (and no login is not allowed), the
+		/// connection fails. The order is no protection against an attacker in the network
+		/// path, who can remove the preferred types from the server's offer: list only the
+		/// types a host needs.
+		public let allowedAuthenticationTypes: [VNCAuthenticationType]
+
+		/// Whether a server that asks for no login is accepted, when it offers none of
+		/// `allowedAuthenticationTypes`.
+		public let allowsNoAuthentication: Bool
+
+		/// Apple Remote Desktop, then VNC password.
+		public static let defaultAllowedAuthenticationTypes: [VNCAuthenticationType] = [
+			.appleRemoteDesktop,
+			.vnc
+		]
+
 #if canImport(ObjectiveC)
 		@objc(frameEncodings)
 #endif
@@ -72,7 +89,9 @@ public extension VNCConnection {
 					inputMode: InputMode,
 					isClipboardRedirectionEnabled: Bool,
 					colorDepth: ColorDepth,
-					frameEncodings: [VNCFrameEncodingType]) {
+					frameEncodings: [VNCFrameEncodingType],
+					allowedAuthenticationTypes: [VNCAuthenticationType],
+					allowsNoAuthentication: Bool) {
 			self.isDebugLoggingEnabled = isDebugLoggingEnabled
 
 			self.hostname = hostname
@@ -89,6 +108,33 @@ public extension VNCConnection {
 
 			self.colorDepth = colorDepth
 			self.frameEncodings = frameEncodings
+			self.allowedAuthenticationTypes = allowedAuthenticationTypes
+			self.allowsNoAuthentication = allowsNoAuthentication
+		}
+
+		/// The default login types (`defaultAllowedAuthenticationTypes`, no login refused).
+		public convenience init(isDebugLoggingEnabled: Bool,
+								hostname: String,
+								port: UInt16,
+								isShared: Bool,
+								isScalingEnabled: Bool,
+								useDisplayLink: Bool,
+								inputMode: InputMode,
+								isClipboardRedirectionEnabled: Bool,
+								colorDepth: ColorDepth,
+								frameEncodings: [VNCFrameEncodingType]) {
+			self.init(isDebugLoggingEnabled: isDebugLoggingEnabled,
+					  hostname: hostname,
+					  port: port,
+					  isShared: isShared,
+					  isScalingEnabled: isScalingEnabled,
+					  useDisplayLink: useDisplayLink,
+					  inputMode: inputMode,
+					  isClipboardRedirectionEnabled: isClipboardRedirectionEnabled,
+					  colorDepth: colorDepth,
+					  frameEncodings: frameEncodings,
+					  allowedAuthenticationTypes: Self.defaultAllowedAuthenticationTypes,
+					  allowsNoAuthentication: false)
 		}
 
 #if canImport(ObjectiveC)

@@ -101,3 +101,16 @@ extension VNCProtocol.SecurityTypes {
 		})
 	}
 }
+
+extension VNCProtocol.SecurityType {
+	init(authenticationType: VNCAuthenticationType) {
+		switch authenticationType {
+			case .vnc:
+				self = .vnc
+			case .appleRemoteDesktop:
+				self = .diffieHellman
+			case .ultraVNCMSLogonII:
+				self = .ultraVNCMSLogonII
+		}
+	}
+}

@@ -103,16 +103,13 @@ private extension VNCConnection {
 
 		let supportedSecurityTypes = supportedTypes.securityTypes
 
-		if supportedSecurityTypes.contains(.none) {
+		if let allowed = settings.allowedAuthenticationTypes
+			.map(VNCProtocol.SecurityType.init(authenticationType:))
+			.first(where: supportedSecurityTypes.contains) {
+			chosenSecurityType = allowed
+		} else if settings.allowsNoAuthentication,
+				  supportedSecurityTypes.contains(.none) {
 			chosenSecurityType = .none
-		} else if supportedSecurityTypes.contains(.diffieHellman) {
-			chosenSecurityType = .diffieHellman
-		} else if supportedSecurityTypes.contains(.ultraVNCMSLogonII) {
-			chosenSecurityType = .ultraVNCMSLogonII
-		} else if supportedSecurityTypes.contains(.vnc) {
-			chosenSecurityType = .vnc
-		} else if supportedSecurityTypes.contains(.tight) {
-			chosenSecurityType = .tight
 		} else {
 			chosenSecurityType = .invalid
 		}

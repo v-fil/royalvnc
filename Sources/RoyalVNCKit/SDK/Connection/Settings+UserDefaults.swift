@@ -68,6 +68,8 @@ private extension VNCConnection.Settings {
 		private let isClipboardRedirectionEnabledKey = "isClipboardRedirectionEnabled"
 		private let colorDepthKey = "colorDepth"
 		private let frameEncodingsKey = "frameEncodings"
+		private let allowedAuthenticationTypesKey = "allowedAuthenticationTypes"
+		private let allowsNoAuthenticationKey = "allowsNoAuthentication"
 
 		init(defaults: UserDefaults) {
 			self.defaults = defaults
@@ -86,7 +88,9 @@ private extension VNCConnection.Settings {
 				inputModeKey: InputMode.forwardKeyboardShortcutsIfNotInUseLocally.rawValue,
 				isClipboardRedirectionEnabledKey: true,
 				colorDepthKey: ColorDepth.depth24Bit.rawValue,
-				frameEncodingsKey: VNCFrameEncodingType.defaultFrameEncodings.encode()
+				frameEncodingsKey: VNCFrameEncodingType.defaultFrameEncodings.encode(),
+				allowedAuthenticationTypesKey: VNCConnection.Settings.defaultAllowedAuthenticationTypes.map(\.rawValue),
+				allowsNoAuthenticationKey: false
 			])
 		}
 
@@ -147,6 +151,22 @@ private extension VNCConnection.Settings {
 			}
 		}
 
+		var allowedAuthenticationTypes: [VNCAuthenticationType] {
+			get {
+				guard let rawValues = defaults.array(forKey: allowedAuthenticationTypesKey) as? [Int] else {
+					return VNCConnection.Settings.defaultAllowedAuthenticationTypes
+				}
+
+				return rawValues.compactMap(VNCAuthenticationType.init(rawValue:))
+			}
+			set { defaults.set(newValue.map(\.rawValue), forKey: allowedAuthenticationTypesKey) }
+		}
+
+		var allowsNoAuthentication: Bool {
+			get { defaults.bool(forKey: allowsNoAuthenticationKey) }
+			set { defaults.set(newValue, forKey: allowsNoAuthenticationKey) }
+		}
+
 		var colorDepth: ColorDepth {
 			get { .init(rawValue: .init(defaults.integer(forKey: colorDepthKey))) ?? .depth24Bit }
 			set { defaults.set(newValue.rawValue, forKey: colorDepthKey) }
@@ -163,6 +183,8 @@ private extension VNCConnection.Settings {
 			isClipboardRedirectionEnabled = settings.isClipboardRedirectionEnabled
 			colorDepth = settings.colorDepth
 			frameEncodings = settings.frameEncodings
+			allowedAuthenticationTypes = settings.allowedAuthenticationTypes
+			allowsNoAuthentication = settings.allowsNoAuthentication
 		}
 
 		func load() -> VNCConnection.Settings {
@@ -175,7 +197,9 @@ private extension VNCConnection.Settings {
 				  inputMode: inputMode,
 				  isClipboardRedirectionEnabled: isClipboardRedirectionEnabled,
 				  colorDepth: colorDepth,
-				  frameEncodings: frameEncodings)
+				  frameEncodings: frameEncodings,
+				  allowedAuthenticationTypes: allowedAuthenticationTypes,
+				  allowsNoAuthentication: allowsNoAuthentication)
 		}
 	}
 }
