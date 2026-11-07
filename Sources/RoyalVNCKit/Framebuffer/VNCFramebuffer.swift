@@ -479,8 +479,11 @@ extension VNCFramebuffer {
 
 // MARK: - Update Framebuffer
 private extension VNCFramebuffer {
+	/// `data` is in the server's pixel format, or in the framebuffer's own format when
+	/// `isInternalFormat` is set (CopyRect reads it back from the framebuffer).
 	func updatePixelBufferWithData(_ data: inout Data,
-								   forRegion region: VNCRegion) {
+								   forRegion region: VNCRegion,
+								   isInternalFormat: Bool = false) {
 		guard width > 0,
 			  height > 0,
 			  region.size.width > 0,
@@ -497,10 +500,10 @@ private extension VNCFramebuffer {
 		let regionX = Int(region.location.x)
 		let regionY = Int(region.location.y)
 
-		let sourceBytesPerPixel = sourceProperties.bytesPerPixel
+		let sourceBytesPerPixel = isInternalFormat ? destinationProperties.bytesPerPixel : sourceProperties.bytesPerPixel
 		let destinationBytesPerPixel = destinationProperties.bytesPerPixel
 
-		let needsColorConversion = self.needsColorConversion
+		let needsColorConversion = isInternalFormat ? false : self.needsColorConversion
 		let logger = self.logger
 
 		let fixedAlpha = UInt8(destinationProperties.alphaMax)
@@ -513,11 +516,11 @@ private extension VNCFramebuffer {
 
 		data.withUnsafeBytes { sourcePixelDataPtr in
 			for row in 0..<regionHeight {
-				let sourceRowOffset = sourceOffsetOf(row: row, width: regionWidth)
+				let sourceRowOffset = sourceBytesPerPixel * row * regionWidth
 				let destinationRowOffset = destinationOffsetOf(row: row + regionY, width: frameBufferWidth)
 
 				if !needsColorConversion { // Fast Path
-					let sourceColumnOffsetStart = sourceOffsetOf(column: 0)
+					let sourceColumnOffsetStart = 0
 					let destinationColumnOffsetStart = destinationOffsetOf(column: 0 + regionX)
 
 					let sourceOffset = sourceRowOffset + sourceColumnOffsetStart
@@ -666,7 +669,8 @@ private extension VNCFramebuffer {
 		var data = bufferData(ofRegion: sourceRegion)
 
 		updatePixelBufferWithData(&data,
-								  forRegion: destinationRegion)
+								  forRegion: destinationRegion,
+								  isInternalFormat: true)
     }
 
 	func bufferData(ofRegion region: VNCRegion) -> Data {

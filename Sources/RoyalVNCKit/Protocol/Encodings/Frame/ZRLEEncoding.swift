@@ -29,10 +29,28 @@ extension VNCProtocol {
 			self.tileBuffer = .init(repeating: 0, count: bufferLength)
 		}
 
+		/// Little-endian true colour: 32bpp with depth 24 and every channel in the low three
+		/// bytes (3-byte CPIXELs, stored as the first three bytes of the pixel), or 16bpp
+		/// (CPIXEL = PIXEL). Decoded pixels stay in the source format; the framebuffer converts them.
 		static func supportsPixelFormat(_ pixelFormat: VNCProtocol.PixelFormat) -> Bool {
-			pixelFormat.bitsPerPixel == 32 &&
-			pixelFormat.depth == 24 &&
-			pixelFormat.trueColor == true
+			guard pixelFormat.trueColor,
+				  !pixelFormat.bigEndian else {
+				return false
+			}
+
+			switch pixelFormat.bitsPerPixel {
+				case 32:
+					let channels = [(pixelFormat.redMax, pixelFormat.redShift),
+									(pixelFormat.greenMax, pixelFormat.greenShift),
+									(pixelFormat.blueMax, pixelFormat.blueShift)]
+
+					return pixelFormat.depth == 24 &&
+						   channels.allSatisfy { (UInt32($0.0) << $0.1) < (1 << 24) }
+				case 16:
+					return true
+				default:
+					return false
+			}
 		}
 	}
 }
@@ -42,17 +60,11 @@ extension VNCProtocol.ZRLEEncoding {
 						 framebuffer: VNCFramebuffer,
 						 connection: NetworkConnectionReading,
 						 logger: VNCLogger) async throws {
-		// TODO: To support other pixel formats we must refactor to support non-24-bit color depths
-		guard framebuffer.destinationProperties.bytesPerPixel == framebuffer.sourceProperties.bytesPerPixel,
-			  framebuffer.destinationProperties.bitsPerPixel == framebuffer.sourceProperties.bitsPerPixel else {
+		let currentBytesPerPixel = framebuffer.sourceProperties.bytesPerPixel
+
+		guard currentBytesPerPixel == 4 || currentBytesPerPixel == 2 else {
 			throw VNCError.protocol(.zrleUnsupportedBitsPerPixel(bitsPerPixel: framebuffer.sourceProperties.bitsPerPixel))
 		}
-
-		let currentBytesPerPixel = framebuffer.sourceProperties.bytesPerPixel
-        
-        guard currentBytesPerPixel == 4 else {
-            throw VNCError.protocol(.zrleUnsupportedBitsPerPixel(bitsPerPixel: framebuffer.sourceProperties.bitsPerPixel))
-        }
 
 		if currentBytesPerPixel != self.bytesPerPixel {
 			self.bytesPerPixel = currentBytesPerPixel
@@ -175,6 +187,10 @@ private extension VNCProtocol.ZRLEEncoding {
 
 		let targetLength = numberOfPixels * bytesPerPixel
 
+		guard bytesPerPixel == 4 else { // 16bpp: CPIXEL = PIXEL
+			return try stream.read(length: targetLength)
+		}
+
 		try pixelBuffer.withUnsafeMutableBytes { pixelBufferPtr in
 			let length = 3 /* RGB */ * numberOfPixels
 
@@ -232,15 +248,15 @@ private extension VNCProtocol.ZRLEEncoding {
 
 					let indexInPalette = (Int(encoded) >> shift) & mask
 
-					let sourceStartIndex = indexInPalette * 4
+					let sourceStartIndex = indexInPalette * bytesPerPixel
 
 					guard let target = tileBufferPtr.baseAddress?.advanced(by: offset).assumingMemoryBound(to: UInt8.self) else {
 						throw VNCError.protocol(.invalidData)
 					}
 
-					palette.copyBytes(to: target, from: sourceStartIndex..<sourceStartIndex + 4)
+					palette.copyBytes(to: target, from: sourceStartIndex..<sourceStartIndex + bytesPerPixel)
 
-					offset += 4
+					offset += bytesPerPixel
 					shift -= bitsPerPixel
 				}
 
@@ -274,14 +290,14 @@ private extension VNCProtocol.ZRLEEncoding {
                 }
 
 				for _ in 0..<length {
-					let sourceStartIdx = idx * 4
+					let sourceStartIdx = idx * bytesPerPixel
 
 					guard let target = tileBufferPtr.baseAddress?.advanced(by: sourceStartIdx).assumingMemoryBound(to: UInt8.self) else {
 						throw VNCError.protocol(.invalidData)
 					}
 
 					pixel.copyBytes(to: target,
-									count: 4)
+									count: bytesPerPixel)
 
 					idx += 1
 				}
@@ -324,15 +340,15 @@ private extension VNCProtocol.ZRLEEncoding {
 				}
 
 				for _ in 0..<length {
-					let sourceStartIndex = indexInPalette * 4
-					let targetStartIndex = offset * 4
+					let sourceStartIndex = indexInPalette * bytesPerPixel
+					let targetStartIndex = offset * bytesPerPixel
 
 					guard let target = tileBufferPtr.baseAddress?.advanced(by: targetStartIndex).assumingMemoryBound(to: UInt8.self) else {
 						throw VNCError.protocol(.invalidData)
 					}
 
 					palette.copyBytes(to: target,
-									  from: sourceStartIndex..<sourceStartIndex + 4)
+									  from: sourceStartIndex..<sourceStartIndex + bytesPerPixel)
 
 					offset += 1
 				}
