@@ -82,13 +82,14 @@ extension VNCProtocol.ZRLEEncoding {
 
 		let stream = DataStream(data: decompressedData)
 
-		let rectangleWidth = rectangle.width
-		let rectangleHeight = rectangle.height
+		// Int, so tile positions near the 65535 limit can't overflow
+		let rectangleWidth = Int(rectangle.width)
+		let rectangleHeight = Int(rectangle.height)
 
-		let rectangleX = rectangle.xPosition
-		let rectangleY = rectangle.yPosition
+		let rectangleX = Int(rectangle.xPosition)
+		let rectangleY = Int(rectangle.yPosition)
 
-		let tileSize = Self.tileSize
+		let tileSize = Int(Self.tileSize)
 
         var tileY = rectangleY
 
@@ -102,10 +103,10 @@ extension VNCProtocol.ZRLEEncoding {
 
 				let actualTileSize = tileWidth * tileHeight
 
-				let tileRegion = VNCRegion(x: tileX,
-										   y: tileY,
-										   width: tileWidth,
-										   height: tileHeight)
+				let tileRegion = VNCRegion(x: .init(tileX),
+										   y: .init(tileY),
+										   width: .init(tileWidth),
+										   height: .init(tileHeight))
 
 //                logger.logDebug("Getting Subencoding of ZRLE Tile (Tile Region: \(tileRegion), Size: \(actualTileSize))")
 
@@ -129,15 +130,15 @@ extension VNCProtocol.ZRLEEncoding {
 					var data = try decodePaletteTile(stream: stream,
                                                      logger: logger,
 													 paletteSize: subencoding,
-													 tileSize: tileSize,
-													 tileWidth: tileWidth,
-													 tileHeight: tileHeight)
+													 tileSize: Self.tileSize,
+													 tileWidth: .init(tileWidth),
+													 tileHeight: .init(tileHeight))
 
 					framebuffer.update(region: tileRegion, data: &data)
 				} else if subencoding == 128 {
 					var data = try decodeRLETile(stream: stream,
                                                  logger: logger,
-												 tileSize: actualTileSize)
+												 tileSize: .init(actualTileSize))
 
 					framebuffer.update(region: tileRegion, data: &data)
 				} else if subencoding >= 130 && subencoding <= 255 {
@@ -146,7 +147,7 @@ extension VNCProtocol.ZRLEEncoding {
 					var data = try decodeRLEPaletteTile(stream: stream,
                                                         logger: logger,
 														paletteSize: paletteSize,
-														tileSize: actualTileSize)
+														tileSize: .init(actualTileSize))
 
 					framebuffer.update(region: tileRegion, data: &data)
 				} else {

@@ -29,8 +29,9 @@ extension VNCProtocol.HextileEncoding {
 		let rectangleX = rectangle.xPosition
 		let rectangleY = rectangle.yPosition
 
-		let xTileCount = (rectangleWidth + Self.tileSize - 1) / Self.tileSize
-		let yTileCount = (rectangleHeight + Self.tileSize - 1) / Self.tileSize
+		// Int, so a width or height near 65535 can't overflow
+		let xTileCount = UInt16((Int(rectangleWidth) + Int(Self.tileSize) - 1) / Int(Self.tileSize))
+		let yTileCount = UInt16((Int(rectangleHeight) + Int(Self.tileSize) - 1) / Int(Self.tileSize))
 
 		var lastBackgroundPixelData: Data?
 		var lastForegroundPixelData: Data?

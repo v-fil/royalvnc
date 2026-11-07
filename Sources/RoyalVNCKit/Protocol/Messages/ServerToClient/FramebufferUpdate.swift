@@ -51,6 +51,12 @@ extension VNCProtocol.FramebufferUpdate {
 			}
 
 			if let frameEncoding = encoding as? VNCFrameEncoding {
+				// Decoders do their tile arithmetic in UInt16 and write inside the framebuffer
+				guard Int(rectangle.xPosition) + Int(rectangle.width) <= Int(framebuffer.size.width),
+					  Int(rectangle.yPosition) + Int(rectangle.height) <= Int(framebuffer.size.height) else {
+					throw VNCError.protocol(.invalidData)
+				}
+
 				logger.logDebug("Decoding frame rectangle \(idx + 1)/\(numberOfRectangles)")
 
 				try await frameEncoding.decodeRectangle(rectangle,
