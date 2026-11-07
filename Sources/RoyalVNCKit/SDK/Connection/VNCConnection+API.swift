@@ -36,6 +36,12 @@ public extension VNCConnection {
 
 		clientToServerMessageQueue.enqueue(sendPixelFormatMessage)
 
+		// Which encodings the decoders accept depends on the pixel format: without this the
+		// server keeps sending, say, ZRLE in a format it can't decode, and the session ends.
+		if let encodings = try? orderedEncodingTypes() {
+			clientToServerMessageQueue.enqueue(VNCProtocol.SetEncodings(encodingTypes: encodings))
+		}
+
 		recreateFramebuffer(size: framebuffer.size,
 							screens: framebuffer.screens,
 							pixelFormat: newPixelFormat)

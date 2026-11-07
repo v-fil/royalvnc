@@ -29,10 +29,15 @@ extension VNCProtocol {
 			self.tileBuffer = .init(repeating: 0, count: bufferLength)
 		}
 
-		/// Little-endian true colour: 32bpp with depth 24 and every channel in the low three
-		/// bytes (3-byte CPIXELs, stored as the first three bytes of the pixel), or 16bpp
-		/// (CPIXEL = PIXEL). Decoded pixels stay in the source format; the framebuffer converts them.
+		/// 8bpp (true colour or colour map), or little-endian true colour: 32bpp with depth 24
+		/// and every channel in the low three bytes (3-byte CPIXELs, stored as the first three
+		/// bytes of the pixel), or 16bpp. Below 32bpp, CPIXEL = PIXEL. Decoded pixels stay in
+		/// the source format; the framebuffer converts them.
 		static func supportsPixelFormat(_ pixelFormat: VNCProtocol.PixelFormat) -> Bool {
+			if pixelFormat.bitsPerPixel == 8 {
+				return true
+			}
+
 			guard pixelFormat.trueColor,
 				  !pixelFormat.bigEndian else {
 				return false
@@ -62,7 +67,7 @@ extension VNCProtocol.ZRLEEncoding {
 						 logger: VNCLogger) async throws {
 		let currentBytesPerPixel = framebuffer.sourceProperties.bytesPerPixel
 
-		guard currentBytesPerPixel == 4 || currentBytesPerPixel == 2 else {
+		guard [4, 2, 1].contains(currentBytesPerPixel) else {
 			throw VNCError.protocol(.zrleUnsupportedBitsPerPixel(bitsPerPixel: framebuffer.sourceProperties.bitsPerPixel))
 		}
 
@@ -196,7 +201,7 @@ private extension VNCProtocol.ZRLEEncoding {
 
 		let targetLength = numberOfPixels * bytesPerPixel
 
-		guard bytesPerPixel == 4 else { // 16bpp: CPIXEL = PIXEL
+		guard bytesPerPixel == 4 else { // 16 and 8bpp: CPIXEL = PIXEL
 			return try stream.read(length: targetLength)
 		}
 

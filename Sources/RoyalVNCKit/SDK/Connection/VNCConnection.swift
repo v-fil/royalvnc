@@ -141,7 +141,7 @@ public final class VNCConnection: NSObjectOrAnyObject {
 		// Frame Encodings (Customizable)
 		var customizedFrameEncodings = settings.frameEncodings.map({ $0.rawValue })
 
-		// TODO: Remove once we support ZRLE for non-24-bit pixel formats
+		// ZRLE decodes only some pixel formats (see supportsPixelFormat)
 		if let pixelFormat = state.pixelFormat,
 		   customizedFrameEncodings.contains(VNCFrameEncodingType.zrle.rawValue),
 		   !VNCProtocol.ZRLEEncoding.supportsPixelFormat(pixelFormat) {
