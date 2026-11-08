@@ -1,11 +1,12 @@
 # Fuzz target for the 1011 decoder (fuzz_mvs.c), seeded with synthetic inputs (seeds.c).
 #
-#   make replay        any C compiler: runs the seeds, and the inputs in corpus/ if present,
-#                      once each, with AddressSanitizer + UBSan. CORPUS=dir... adds directories.
+#   make replay        (or make test) clang or GCC, GNU make: runs the seeds, and the inputs in
+#                      corpus/ if present, once each, with AddressSanitizer + UBSan.
+#                      CORPUS=path... adds files or directories.
 #   make fuzz          libFuzzer, coverage guided: FUZZ_TIME seconds (default 300), new inputs
 #                      in corpus/, crashes as crash-* here. Needs a clang that ships libFuzzer
-#                      (Apple's does not): on macOS e.g. FUZZ_CC="$(brew --prefix llvm)/bin/clang";
-#                      on Linux plain clang. FUZZ_FLAGS adds libFuzzer options.
+#                      (Apple's does not); FUZZ_CC names it, FUZZ_LDFLAGS adds link flags (a
+#                      toolchain's own libc++, say), FUZZ_FLAGS adds libFuzzer options.
 #   make clean
 #
 # The seeds are written to seeds/ at build time; nothing in seeds/ or corpus/ is committed.
@@ -19,13 +20,16 @@ CFLAGS = -O1 -g $(WARN) $(SAN)
 FUZZ_CC = clang
 FUZZ_CFLAGS = -O1 -g $(WARN) -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined
 FUZZ_TIME = 300
+FUZZ_LDFLAGS =
 FUZZ_FLAGS =
 CORPUS =
 
-replay: fuzz_mvs_replay seeds/.done
+test: replay
+
+replay: fuzz_mvs_replay seeds.stamp
 	./fuzz_mvs_replay seeds $(wildcard corpus) $(CORPUS)
 
-fuzz: fuzz_mvs seeds/.done
+fuzz: fuzz_mvs seeds.stamp
 	mkdir -p corpus
 	./fuzz_mvs -max_total_time=$(FUZZ_TIME) -print_final_stats=1 $(FUZZ_FLAGS) corpus seeds
 
@@ -33,18 +37,18 @@ fuzz_mvs_replay: $(DEPS)
 	$(CC) $(CFLAGS) -DMVS_FUZZ_REPLAY -I$(MVS)/include -o $@ $(SRC)
 
 fuzz_mvs: $(DEPS)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) -I$(MVS)/include -o $@ $(SRC)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -I$(MVS)/include -o $@ $(SRC) $(FUZZ_LDFLAGS)
 
 seeds_gen: seeds.c
 	$(CC) $(CFLAGS) -o $@ seeds.c
 
-seeds/.done: seeds_gen
+seeds.stamp: seeds_gen
 	rm -rf seeds
 	mkdir -p seeds
 	./seeds_gen seeds
 	touch $@
 
 clean:
-	rm -rf fuzz_mvs fuzz_mvs_replay seeds_gen *.dSYM seeds
+	rm -rf fuzz_mvs fuzz_mvs_replay seeds_gen *.dSYM seeds seeds.stamp
 
-.PHONY: replay fuzz clean
+.PHONY: test replay fuzz clean

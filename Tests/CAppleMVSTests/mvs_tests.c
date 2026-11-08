@@ -426,35 +426,131 @@ static void test_malformed(void) {
         CHECK(mvs_blit_bgra(none, 0, 0, 1, 1, bgra, W * 4) == -1); /* no framebuffer */
         mvs_free(none);
     }
+}
 
-    /* The precondition in mvs.h: the blit clips to the decoder's picture only, so dst must
-     * cover the region, and that is all it must cover. */
+/* Empty rects report nothing changed as 0,0 0x0, like partial updates that change nothing. */
+static void test_empty_region(void) {
+    TEST("empty region: a full update of a 16x0 or 0x8 rect reports 0,0 0x0");
+    const int rects[][4] = {{0, 2, 16, 0}, {3, 0, 0, 8}, {0, 0, 0, 0}};
+    int bad = 0;
+    for (int i = 0; i < 3; i++) {
+        const packet *ps[] = {&P_FULL, &P_PARTIAL_CR_UP};
+        for (int k = 0; k < 2; k++) {
+            sess s = sess_new(W, H);
+            mvs_result r;
+            if (k == 1) dec(&s, &P_FULL, 0, 0);
+            int rc = mvs_decode_rect(s.d, W, H, rects[i][0], rects[i][1], rects[i][2], rects[i][3],
+                                     ps[k]->b, ps[k]->n, &r);
+            if (rc != MVS_OK || r.x != 0 || r.y != 0 || r.w != 0 || r.h != 0) bad++;
+            mvs_free(s.d);
+        }
+    }
+    CHECK(bad == 0);
+}
+
+/* The cache write index wraps from slot 64999 to slot 1, never writing 0 or 65000, and a slot
+ * written again is rendered from its new entry, not from pixels kept from before. */
+static void test_cache_wrap(void) {
+    TEST("cache: the write index wraps to slot 1 and a rewritten slot renders anew");
+    const uint32_t GRAY = RGB(148, 148, 148), REDDISH = RGB(151, 147, 148);
+    sess s = sess_new(W, H);
+    run_seq(&s, (const packet *[]){&P_FULL, &P_PARTIAL_CR_UP, &P_CACHE_1}, 3);
+    CHECK(s.rc == MVS_OK && s.d->cacheWriteIdx == 1 && pix(&s, 8, 0) == REDDISH);
+    s.d->cacheWriteIdx = CACHE_SIZE - 2;
+    s.d->cacheCount = CACHE_SIZE - 2;
+    dec(&s, &P_PARTIAL_CR_UP, 0, 0);
+    CHECK(s.rc == MVS_OK && s.d->cacheWriteIdx == CACHE_SIZE - 1);
+    dec(&s, &P_PARTIAL_UNCHANGED, 0, 0);
+    CHECK(s.rc == MVS_OK && s.d->cacheWriteIdx == 1);
+    int written = 0;
+    for (int i = 0; i < CACHE_ENTRY_SIZE; i++)
+        written += s.d->cache[(size_t)CACHE_SIZE * CACHE_ENTRY_SIZE + i] != 0;
+    CHECK(written == 0); /* slot 65000 */
+    dec(&s, &P_CACHE_1, 0, 0);
+    CHECK(s.rc == MVS_OK && s.warnings == 0 && pix(&s, 8, 0) == GRAY);
+    bitbuf b;
+    memset(&b, 0, sizeof b);
+    put_bits(&b, "00 11 0 1111110111100111"); put_marker(&b, "mvs"); /* slot 64999 */
+    packet last = partial_update(14, 19, &b);
+    dec(&s, &last, 0, 0);
+    CHECK(s.rc == MVS_OK && s.warnings == 0 && pix(&s, 8, 0) == REDDISH);
+    mvs_free(s.d);
+}
+
+/* The precondition in mvs.h: the blit clips to the decoder's picture only, so dst must cover
+ * the region, and that is all it must cover. Modes: 0 mvs_blit_bgra, 1 mvs_blit RGB555,
+ * 2 mvs_blit 32 bpp. */
+static size_t mode_bpp(int mode) { return mode == 1 ? 2 : 4; }
+
+static int blit_mode(const mvs_decoder *d, int mode, int x, int y, int w, int h, void *dst, size_t stride) {
+    if (mode == 0) return mvs_blit_bgra(d, x, y, w, h, dst, stride);
+    if (mode == 1) return mvs_blit(d, x, y, w, h, dst, stride, 16, 10, 5, 0, 31, 31, 31);
+    return mvs_blit(d, x, y, w, h, dst, stride, 32, 16, 8, 0, 255, 255, 255);
+}
+
+/* P_FULL's grey (148,148,148) in each mode's output format */
+static uint32_t mode_gray(int mode) {
+    return mode == 0 ? 0xFF949494u : mode == 1 ? 0x4A52u : 0x00949494u; /* 148 -> 18 in 5 bits */
+}
+
+/* dst was filled with 0xAB before the blit. Counts region pixels that are not grey and
+ * bytes outside the region that changed. */
+static int blit_errors(const uint8_t *dst, size_t size, size_t stride, int mode,
+                       int rx, int ry, int rw, int rh) {
+    size_t bpp = mode_bpp(mode);
+    int errors = 0;
+    for (size_t i = 0; i < size; i += bpp) {
+        int row = (int)(i / stride);
+        size_t inRow = i % stride;
+        int col = (int)(inRow / bpp);
+        if (inRow + bpp <= stride && row >= ry && row < ry + rh && col >= rx && col < rx + rw) {
+            uint32_t v = 0;
+            if (bpp == 2) { uint16_t v16; memcpy(&v16, dst + i, 2); v = v16; }
+            else memcpy(&v, dst + i, 4);
+            errors += v != mode_gray(mode);
+        } else {
+            for (size_t j = i; j < i + bpp && j < size; j++) errors += dst[j] != 0xAB;
+        }
+    }
+    return errors;
+}
+
+static void test_blit_precondition(void) {
     TEST("blit precondition: dst only has to reach the region's last pixel");
     {
         /* decoder picture 32x16, region 16,3 16x8 (a decoded rect), dst rows of 32 pixels
          * plus 3 pixels of padding, allocated to end exactly at the region's last pixel */
-        s = sess_new(32, 16);
+        sess s = sess_new(32, 16);
         dec(&s, &P_FULL, 16, 3);
         CHECK(s.rc == MVS_OK);
-        const int rx = 16, ry = 3, rw = W, rh = H, pad = 3;
+        const int rx = 16, ry = 3, rw = W, rh = H;
         for (int mode = 0; mode < 3; mode++) {
-            size_t bpp = mode == 1 ? 2 : 4, stride = (32 + pad) * bpp;
+            size_t bpp = mode_bpp(mode), stride = (32 + 3) * bpp;
             size_t size = (size_t)(ry + rh - 1) * stride + (size_t)(rx + rw) * bpp;
             uint8_t *dst = malloc(size);
             memset(dst, 0xAB, size);
-            int rc = mode == 0 ? mvs_blit_bgra(s.d, rx, ry, rw, rh, dst, stride)
-                   : mode == 1 ? mvs_blit(s.d, rx, ry, rw, rh, dst, stride, 16, 10, 5, 0, 31, 31, 31)
-                               : mvs_blit(s.d, rx, ry, rw, rh, dst, stride, 32, 16, 8, 0, 255, 255, 255);
-            CHECK(rc == 0);
-            int outside = 0, inside = 0;
-            for (size_t i = 0; i < size; i++) {
-                int row = (int)(i / stride), col = (int)(i % stride / bpp);
-                int in = row >= ry && row < ry + rh && col >= rx && col < rx + rw;
-                if (in) inside += dst[i] != 0xAB;
-                else outside += dst[i] != 0xAB;
-            }
-            CHECK(outside == 0);    /* nothing written outside the region */
-            CHECK(inside > 0);      /* the region itself was written */
+            CHECK(blit_mode(s.d, mode, rx, ry, rw, rh, dst, stride) == 0);
+            CHECK(blit_errors(dst, size, stride, mode, rx, ry, rw, rh) == 0);
+            free(dst);
+        }
+        mvs_free(s.d);
+    }
+
+    TEST("blit precondition: dst rows may be narrower than the decoder's picture");
+    {
+        /* decoder picture 32x16, P_FULL decoded at 0,3; region 8,3 8x8 into rows of 20
+         * pixels, allocated to end exactly at the region's last pixel */
+        sess s = sess_new(32, 16);
+        dec(&s, &P_FULL, 0, 3);
+        CHECK(s.rc == MVS_OK);
+        const int rx = 8, ry = 3, rw = 8, rh = 8;
+        for (int mode = 0; mode < 3; mode++) {
+            size_t bpp = mode_bpp(mode), stride = 20 * bpp;
+            size_t size = (size_t)(ry + rh - 1) * stride + (size_t)(rx + rw) * bpp;
+            uint8_t *dst = malloc(size);
+            memset(dst, 0xAB, size);
+            CHECK(blit_mode(s.d, mode, rx, ry, rw, rh, dst, stride) == 0);
+            CHECK(blit_errors(dst, size, stride, mode, rx, ry, rw, rh) == 0);
             free(dst);
         }
         mvs_free(s.d);
@@ -463,30 +559,27 @@ static void test_malformed(void) {
     TEST("blit precondition: a region past the decoder's picture is clipped to it");
     {
         /* decoder picture 16x8, dst 32x16: of region 8,4 24x12 only 8,4 8x4 is written */
-        s = sess_new(W, H);
+        sess s = sess_new(W, H);
         dec(&s, &P_FULL, 0, 0);
-        uint32_t big[32 * 16];
-        for (int mode = 0; mode < 2; mode++) {
-            for (int i = 0; i < 32 * 16; i++) big[i] = 0xABABABABu;
-            int rc = mode == 0 ? mvs_blit_bgra(s.d, 8, 4, 24, 12, big, 32 * 4)
-                               : mvs_blit(s.d, 8, 4, 24, 12, big, 32 * 4, 32, 16, 8, 0, 255, 255, 255);
-            CHECK(rc == 0);
-            int wrong = 0;
-            for (int y = 0; y < 16; y++)
-                for (int x = 0; x < 32; x++) {
-                    int in = x >= 8 && x < W && y >= 4 && y < H;
-                    uint32_t v = big[y * 32 + x];
-                    if (in ? v != (mode == 0 ? 0xFF949494u : 0x00949494u) : v != 0xABABABABu) wrong++;
-                }
-            CHECK(wrong == 0);
+        for (int mode = 0; mode < 3; mode++) {
+            size_t stride = 32 * mode_bpp(mode), size = 16 * stride;
+            uint8_t *dst = malloc(size);
+            memset(dst, 0xAB, size);
+            CHECK(blit_mode(s.d, mode, 8, 4, 24, 12, dst, stride) == 0);
+            CHECK(blit_errors(dst, size, stride, mode, 8, 4, W - 8, H - 4) == 0);
+            free(dst);
         }
         mvs_free(s.d);
     }
 }
+
 int main(void) {
     build_packets();
     test_ported();
     test_malformed();
+    test_empty_region();
+    test_cache_wrap();
+    test_blit_precondition();
     printf("%d tests, %d check failures\n", tests_run, tests_failed);
     return tests_failed ? 1 : 0;
 }

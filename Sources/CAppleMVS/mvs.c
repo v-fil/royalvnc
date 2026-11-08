@@ -984,8 +984,9 @@ int mvs_decode_rect(mvs_decoder *d, int fbw, int fbh, int x, int y, int w, int h
     case 0x00:
         if (setjmp(d->jb) == 0) run_full(d, data, len, x, y, w, h);
         else rc = d->err;
-        /* drawn even after an error: the tiles done so far are in the framebuffer */
-        res->x = x; res->y = y; res->w = w; res->h = h;
+        /* drawn even after an error: the tiles done so far are in the framebuffer;
+         * an empty rect stays 0,0 0x0 */
+        if (w > 0 && h > 0) { res->x = x; res->y = y; res->w = w; res->h = h; }
         break;
     case 0x01:
         d->pminX = d->pminY = INT32_MAX;

@@ -47,8 +47,9 @@ enum {
 };
 
 typedef struct {
-    /* Region of the framebuffer that changed; w == 0 means nothing. Set also
-     * when the update failed part way, because the tiles done so far are drawn. */
+    /* Region of the framebuffer that changed, w > 0 and h > 0; nothing changed
+     * is 0,0 0x0 (all four 0). Set also when the update failed part way,
+     * because the tiles done so far are drawn. */
     int x, y, w, h;
     /* Soft problems the JS decoder only logs: end marker mismatch, cache index
      * out of range, repeat tile without a previous one. */

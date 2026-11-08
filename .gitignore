@@ -103,6 +103,7 @@ Tests/CAppleMVSFuzz/fuzz_mvs_replay
 Tests/CAppleMVSFuzz/seeds_gen
 Tests/CAppleMVSFuzz/*.dSYM/
 Tests/CAppleMVSFuzz/seeds/
+Tests/CAppleMVSFuzz/seeds.stamp
 Tests/CAppleMVSFuzz/corpus/
 Tests/CAppleMVSFuzz/crash-*
 Tests/CAppleMVSFuzz/leak-*

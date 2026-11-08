@@ -2,11 +2,13 @@
  * Writes the seed corpus for fuzz_mvs.c into a directory: synthetic inputs
  * only, built bit by bit like the cases in Tests/CAppleMVSTests (noVNC-ARD's
  * test cases and more). Each seed is a sequence of operations in the
- * fuzz_mvs.c input format. `seeds <directory>`; the Makefile runs it.
+ * fuzz_mvs.c input format. `seeds_gen <directory>`; the Makefile runs it.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public License,
  * v. 2.0. If a copy of the MPL was not distributed with this file, You can
  * obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * Ported from noVNC-ARD (MPL 2.0), https://github.com/peetinc/noVNC-ARD
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -85,12 +87,16 @@ static seed start(int fbw, int fbh) {
     put(&s, head, 2);
     return s;
 }
-/* op 0: a rect (x, y, w, h as the fuzz target reads them for this framebuffer) */
-static void rect(seed *s, int x, int y, int w, int h, const packet *p) {
-    uint8_t rec[7] = {0, (uint8_t)x, (uint8_t)y, (uint8_t)w, (uint8_t)h, (uint8_t)(p->n >> 8), (uint8_t)p->n};
+/* op 0: a rect (x, y, w, h as the fuzz target reads them for this framebuffer), blitted
+ * into rows that end at the region's right edge (narrow) or the framebuffer's, plus pad
+ * pixels */
+static void rect_dst(seed *s, int narrow, int pad, int x, int y, int w, int h, const packet *p) {
+    uint8_t op = (uint8_t)((narrow ? 1 << 5 : 0) | (pad & 7) << 2);
+    uint8_t rec[7] = {op, (uint8_t)x, (uint8_t)y, (uint8_t)w, (uint8_t)h, (uint8_t)(p->n >> 8), (uint8_t)p->n};
     put(s, rec, 7);
     put(s, p->b, p->n);
 }
+static void rect(seed *s, int x, int y, int w, int h, const packet *p) { rect_dst(s, 0, 0, x, y, w, h, p); }
 /* op 1: a 0x0 rect at 0,0 */
 static void rect0(seed *s, const packet *p) {
     uint8_t rec[7] = {1, 0, 0, 0, 0, (uint8_t)(p->n >> 8), (uint8_t)p->n};
@@ -124,13 +130,14 @@ int main(int argc, char **argv) {
     put_bits(&h, "0 101 1 0000"); put_marker(&h, "m");
     put_bits(&b, DCT_TILE " 1"); put_marker(&b, "m");
     packet full = full_update(15, 25, &h, &b);
-    packet full_thr5 = full_update(5, 40, &h, &b);
 
     /* Same, with Y AC position 1 = +2 */
     memset(&h, 0, sizeof h); memset(&b, 0, sizeof b);
     put_bits(&h, "0 101 1 0000"); put_marker(&h, "m");
     put_bits(&b, "0 0 0 00 00 1110 010 1 0 10 0 01 0 1"); put_marker(&b, "m");
     packet full_ac = full_update(15, 25, &h, &b);
+    /* Same bits with threshold 5: the AC at position 1 is stored as 8, not 0 */
+    packet full_ac_thr5 = full_update(5, 40, &h, &b);
 
     /* Partial updates against the full update */
     packet partial_ac[2];
@@ -158,7 +165,8 @@ int main(int argc, char **argv) {
     memset(&b, 0, sizeof b);
     put_bits(&b, "01 000011 1 10 0 0 00 1 " EOB " 1 1 " EOB " 10"); put_marker(&b, "mvs");
     packet partial_rice = partial_update(63, 63, &b);
-    /* Threshold below 15: three-bit Y AC deltas */
+    /* Threshold below 15 against full_ac_thr5: a three-bit delta on the stored
+     * AC at position 1, Rice values where nothing was stored */
     memset(&b, 0, sizeof b);
     put_bits(&b, "01 001000 010 011 00 00 00 00 1010 110001 1 0 " EOB " 0 " EOB " 00"); put_marker(&b, "mvs");
     packet partial_thr5 = partial_update(5, 5, &b);
@@ -183,6 +191,8 @@ int main(int argc, char **argv) {
     rect(&s, 0, 0, 16, 8, &unchanged);
     rect(&s, 0, 0, 16, 8, &cache_1);
     rect(&s, 0, 0, 16, 8, &cache_next);
+    rect0(&s, &tables); /* new tables: the slot rendered above is rendered again */
+    rect(&s, 0, 0, 16, 8, &cache_1);
     save("partial-cache", &s);
 
     s = start(16, 8);
@@ -193,22 +203,25 @@ int main(int argc, char **argv) {
     save("partial-ac", &s);
 
     s = start(16, 8);
-    rect(&s, 0, 0, 16, 8, &full_thr5);
+    rect(&s, 0, 0, 16, 8, &full_ac_thr5);
     rect(&s, 0, 0, 16, 8, &partial_thr5);
     rect0(&s, &tables);
     rect(&s, 0, 0, 16, 8, &cache_1);
     save("threshold-low", &s);
 
-    /* Not on a tile boundary inside a larger framebuffer, and one that leaves it */
+    /* Not on a tile boundary inside a larger framebuffer, and one that leaves it; blits
+     * into rows narrower than the framebuffer, and padded ones */
     s = start(40, 24);
-    rect(&s, 5, 3, 16, 8, &full);
-    rect(&s, 5, 3, 16, 8, &cr_up);
-    rect(&s, 5, 3, 16, 8, &cache_1);
+    rect_dst(&s, 1, 0, 5, 3, 16, 8, &full);
+    rect_dst(&s, 1, 3, 5, 3, 16, 8, &cr_up);
+    rect_dst(&s, 0, 7, 5, 3, 16, 8, &cache_1);
     rect(&s, 30, 3, 11, 8, &full);
     save("offset-rect", &s);
 
-    /* Reset, size changes and a 0x0 framebuffer between updates */
+    /* Reset, size changes, empty rects and a 0x0 framebuffer between updates */
     s = start(16, 8);
+    rect(&s, 0, 2, 16, 0, &full);
+    rect(&s, 3, 0, 0, 8, &full);
     rect(&s, 0, 0, 16, 8, &full);
     rect(&s, 0, 0, 16, 8, &cr_up);
     reset(&s);
@@ -271,6 +284,73 @@ int main(int argc, char **argv) {
     rect(&s, 0, 0, 8, 8, &skip);
     rect(&s, 0, 0, 8, 8, &rice);
     save("ac-skip-rice", &s);
+
+    /* Full update on 16x8 with Y AC: tile 0 at threshold 4 (dcMode 1, Rice
+     * values near the DC and past it, both signed steps, a short skip), tile 1
+     * at threshold 40 */
+    memset(&h, 0, sizeof h); memset(&b, 0, sizeof b);
+    put_bits(&h, "0 101 1 0000"); put_marker(&h, "m");
+    put_bits(&b, "0 1 0 1110 010 1");               /* tile 0: dcMode 1, threshold 4, Y DC 10 */
+    put_bits(&b, "1 0 01 0  1 11110 010 1  0 11  0 10  0 01 1 00"); /* positions 1-5: 3, -20, -1, +1, skip 3 */
+    put_bits(&b, "1 110 011 0  1 0 1 1  0 00  0 01 0");             /* positions 8-10: 11, -3, 0, EOB */
+    put_bits(&b, "0 0 1 00 00 00  0 10  1 0 00 0  0 01 1 00  0 11  0 01 0"); /* tile 1: threshold 40 */
+    put_marker(&b, "m");
+    packet full_ac_rice = full_update(4, 40, &h, &b);
+    /* Partial against it: three-bit deltas, then Rice values and four-bit deltas
+     * past the threshold, a Huffman run of 16 zeros in Cr */
+    memset(&b, 0, sizeof b);
+    put_bits(&b, "01 001001 000 000 000 0000 00 00 00 0001 0010");
+    put_bits(&b, "0 11111111001 " EOB " 0 " EOB " 00");
+    put_marker(&b, "mvs");
+    packet partial_ac_rice = partial_update(63, 63, &b);
+    /* A Huffman code longer than 16 bits */
+    memset(&b, 0, sizeof b);
+    put_bits(&b, "01 000000 0 1111111111111111"); put_marker(&b, "mvs");
+    packet huffman_bad = partial_update(63, 63, &b);
+    packet unknown = quant_tables(20, 0);
+    unknown.b[0] = 9;
+    s = start(16, 8);
+    rect(&s, 0, 0, 16, 8, &full_ac_rice);
+    rect(&s, 0, 0, 16, 8, &partial_ac_rice);
+    rect(&s, 0, 0, 16, 8, &huffman_bad);
+    rect(&s, 0, 0, 16, 8, &unknown);
+    save("ac-rice-thresholds", &s);
+
+    /* Run lengths in two- and three-byte varints, and a repeat with no DCT tile before it */
+    memset(&h, 0, sizeof h); memset(&b, 0, sizeof b);
+    put_bits(&h, "0 000 1 1111 10000001 00000001"); put_marker(&h, "m");
+    put_marker(&b, "m");
+    packet varint2 = full_update(15, 25, &h, &b);
+    memset(&h, 0, sizeof h);
+    put_bits(&h, "0 000 1 1111 10000000 10000000 00000001"); put_marker(&h, "m");
+    packet varint3 = full_update(15, 25, &h, &b);
+    memset(&h, 0, sizeof h); memset(&b, 0, sizeof b);
+    put_bits(&h, "0 101 0"); put_marker(&h, "m");
+    put_bits(&b, "1"); put_marker(&b, "m");
+    packet repeat_first = full_update(15, 25, &h, &b);
+    s = start(8, 8);
+    rect(&s, 0, 0, 8, 8, &varint2);
+    rect(&s, 0, 0, 8, 8, &varint3);
+    rect(&s, 0, 0, 8, 8, &repeat_first);
+    save("varint-repeat", &s);
+
+    /* A tile copy whose source was redrawn by a later full update: the partial skips it */
+    memset(&h, 0, sizeof h); memset(&b, 0, sizeof b);
+    put_bits(&h, "0 000 0 001 0"); put_marker(&h, "m");
+    put_marker(&b, "m");
+    packet white_copy = full_update(15, 25, &h, &b);
+    memset(&h, 0, sizeof h);
+    put_bits(&h, "0 000 0"); put_marker(&h, "m");
+    packet white = full_update(15, 25, &h, &b);
+    memset(&b, 0, sizeof b);
+    put_bits(&b, "00 10"); put_marker(&b, "mvs");
+    packet copy = partial_update(14, 19, &b);
+    s = start(16, 8);
+    rect(&s, 0, 0, 16, 8, &white_copy);
+    rect(&s, 0, 0, 16, 8, &copy);
+    rect(&s, 0, 0, 8, 8, &white);
+    rect(&s, 0, 0, 16, 8, &copy);
+    save("stale-copy", &s);
 
     printf("seeds: %d written to %s\n", written, outdir);
     return 0;

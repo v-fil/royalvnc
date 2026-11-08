@@ -8,7 +8,7 @@ It depends on [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift), [zlib
 
 ## This fork
 
-A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen Sharing support: encodings 1011 and 1001, SetServerScaling, Apple's clipboard messages, and session encryption after the Apple Remote Desktop login (see [USAGE.md](USAGE.md#apple-session-encryption)). The 1011 decoder in `Sources/CAppleMVS` is a C port of [noVNC-ARD](https://github.com/peetinc/noVNC-ARD) and, like it, is under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/) (see its file headers); everything else stays MIT.
+A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen Sharing support: encodings 1011 and 1001, SetServerScaling, Apple's clipboard messages, and session encryption after the Apple Remote Desktop login (see [USAGE.md](USAGE.md#apple-session-encryption)). The 1011 decoder in `Sources/CAppleMVS` is a C port of [noVNC-ARD](https://github.com/peetinc/noVNC-ARD) and, like it, is under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/); so are the C sources of its tests in `Tests/CAppleMVSTests` and `Tests/CAppleMVSFuzz` (see their file headers). Everything else stays MIT.
 
 `VNCConnection.probeServer(hostname:port:)` reads the protocol version and security types a server offers, without logging in, so a client can choose one login type (via `allowedAuthenticationTypes`) and keep it.
 
@@ -17,9 +17,9 @@ DES, needed by the VNC password and MS-Logon II logins, is our own C code writte
 Tests:
 - `swift test`: known-answer tests for the VNC password and MS-Logon II encryption (`Tests/RoyalVNCKitTests`). `Tests/Vectors/gen.c` prints their expected values from other DES implementations (macOS, needs LibVNCServer; build line in the file). Also Apple's record layer: framing, filler, chaining, sequence numbers, the rekey and every failure, against vectors from `Tests/Vectors/apple_record_layer.py`, an oracle on OpenSSL's AES (needs Python's `cryptography`; usage in the file); and the whole client handshake against a scripted server on 127.0.0.1 (Apple platforms).
 - `make -C Tests/CDESTests test`: DES known answers and VNC-convention vectors (C, AddressSanitizer + UBSan).
-- `make -C Tests/CAppleMVSTests test`: the 1011 decoder (C, AddressSanitizer + UBSan), including the `mvs_blit` precondition: the destination only has to cover the region.
-- `make -C Tests/CAppleMVSFuzz replay`: the 1011 fuzz target (`fuzz_mvs.c`, sequences of rects, resets and size changes on one decoder) run once over a synthetic seed corpus and over `corpus/` if present (any C compiler, AddressSanitizer + UBSan).
-- `make -C Tests/CAppleMVSFuzz fuzz`: the same target under libFuzzer for `FUZZ_TIME` seconds (default 300), new inputs kept in `corpus/`. Needs a clang that ships libFuzzer; Apple's does not, so on macOS pass e.g. `FUZZ_CC="$(brew --prefix llvm)/bin/clang"`.
+- `make -C Tests/CAppleMVSTests test`: the 1011 decoder (C, AddressSanitizer + UBSan), including the `mvs_blit` precondition: the destination only has to cover the region, with rows that may be narrower than the decoder's picture.
+- `make -C Tests/CAppleMVSFuzz replay`: the 1011 fuzz target (`fuzz_mvs.c`, sequences of rects, resets and size changes on one decoder) run once over a synthetic seed corpus and over `corpus/` if present (clang or GCC with GNU make, AddressSanitizer + UBSan).
+- `make -C Tests/CAppleMVSFuzz fuzz`: the same target under libFuzzer for `FUZZ_TIME` seconds (default 300), new inputs kept in `corpus/`. Needs a clang that ships libFuzzer, named by `FUZZ_CC`; Apple's does not. With another toolchain, such as Homebrew's LLVM on macOS, its own link flags may be needed too (`FUZZ_LDFLAGS`; see the toolchain's notes).
 
 ## Supported Features
 

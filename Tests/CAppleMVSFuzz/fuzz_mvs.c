@@ -14,23 +14,31 @@
  * Input:
  *   byte 0, 1   framebuffer width and height, each % 65 (0..64)
  *   then records until the input ends:
- *   op a b c d  five bytes; op % 4 selects:
+ *   op a b c e  five bytes; op % 4 selects:
  *     0  decode a rect: x = a % (fbw + 1), y = b % (fbh + 1),
- *        w = c % (fbw - x + 2), h = d % (fbh - y + 2) (so the rect may end
+ *        w = c % (fbw - x + 2), h = e % (fbh - y + 2) (so the rect may end
  *        one pixel past the framebuffer), followed by
  *        lenHi lenLo and that many body bytes (fewer if the input ends)
  *     1  decode a 0x0 rect at 0,0 (how quantization tables arrive), same
- *        length and body as op 0; a, b, c, d unused
+ *        length and body as op 0; a, b, c, e unused
  *     2  mvs_reset
  *     3  new framebuffer size a % 65 by b % 65 for the following rects
+ *   For ops 0 and 1 the other bits of op shape the blit destination: rows of
+ *   (op >> 5 & 1 ? the region's right edge : fbw) + (op >> 2 & 7) pixels.
+ *
+ * Frames stay at most 64x64 (8x8 tiles) to keep runs fast: the decoder's
+ * index arithmetic does not depend on the frame size beyond what the unit
+ * tests cover (the size limits, negative and odd sizes).
  *
  * Each body is copied into an allocation of exactly its length, so a read
  * past the end is caught. After each decode the target checks what callers
  * rely on and aborts if it does not hold: a known return code, the changed
- * region inside the rect and the framebuffer, the decoder's picture the size
- * of the framebuffer. It then blits the changed region with mvs_blit_bgra and
- * mvs_blit (16 and 32 bpp) into a buffer that ends at the region's last byte,
- * the smallest one the documented precondition allows.
+ * region inside the rect and the framebuffer, or 0,0 0x0 when nothing
+ * changed, and the decoder's picture the size of the framebuffer. It then
+ * blits the changed region with mvs_blit_bgra and mvs_blit (16 and 32 bpp)
+ * into a buffer that ends at the region's last byte, the smallest one the
+ * documented precondition allows, with rows that may be narrower than the
+ * decoder's picture or padded.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public License,
  * v. 2.0. If a copy of the MPL was not distributed with this file, You can
@@ -56,12 +64,12 @@ static int known_code(int rc) {
            rc == MVS_ERR_TYPE || rc == MVS_ERR_QUANT || rc == MVS_ERR_SIZE || rc == MVS_ERR_NOMEM;
 }
 
-/* Blits the region into a buffer of fbw-pixel rows that ends exactly at the
+/* Blits the region into a buffer of rowPx-pixel rows that ends exactly at the
  * region's last pixel. */
-static void blit_region(const mvs_decoder *d, int fbw, const mvs_result *r) {
+static void blit_region(const mvs_decoder *d, int rowPx, const mvs_result *r) {
     for (int mode = 0; mode < 3; mode++) {
         size_t bpp = mode == 1 ? 2 : 4;
-        size_t stride = (size_t)fbw * bpp;
+        size_t stride = (size_t)rowPx * bpp;
         size_t size = (size_t)(r->y + r->h - 1) * stride + (size_t)(r->x + r->w) * bpp;
         uint8_t *dst = malloc(size);
         check(dst != NULL, "blit buffer allocated");
@@ -75,7 +83,7 @@ static void blit_region(const mvs_decoder *d, int fbw, const mvs_result *r) {
 }
 
 static void decode(mvs_decoder *d, int fbw, int fbh, int x, int y, int w, int h,
-                   const uint8_t *data, size_t len) {
+                   const uint8_t *data, size_t len, int dstShape) {
     uint8_t *body = malloc(len ? len : 1);
     check(body != NULL, "body allocated");
     if (len) memcpy(body, data, len);
@@ -90,12 +98,14 @@ static void decode(mvs_decoder *d, int fbw, int fbh, int x, int y, int w, int h,
     const uint32_t *px = mvs_pixels(d, &pw, &ph);
     /* a 0x0 framebuffer right after mvs_new or mvs_reset has no picture */
     check((px != NULL || (fbw == 0 && fbh == 0)) && pw == fbw && ph == fbh, "picture has the framebuffer's size");
-    check(r.w >= 0 && r.h >= 0, "changed region not negative");
-    /* a full update of a rect with one side 0 reports that rect: empty, like w == 0 */
-    if (r.w == 0 || r.h == 0) return;
+    if (r.w <= 0 || r.h <= 0) {
+        check(r.x == 0 && r.y == 0 && r.w == 0 && r.h == 0, "nothing changed is 0,0 0x0");
+        return;
+    }
     check(r.x >= x && r.y >= y && r.x + r.w <= x + w && r.y + r.h <= y + h, "changed region inside the rect");
     check(r.x + r.w <= fbw && r.y + r.h <= fbh, "changed region inside the framebuffer");
-    blit_region(d, fbw, &r);
+    int rowPx = ((dstShape >> 3) & 1 ? r.x + r.w : fbw) + (dstShape & 7);
+    blit_region(d, rowPx, &r);
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
@@ -106,7 +116,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     check(d != NULL, "decoder allocated");
 
     while (size - pos >= 5) {
-        int op = data[pos] % 4, a = data[pos + 1], b = data[pos + 2], c = data[pos + 3], e = data[pos + 4];
+        int op = data[pos] & 3, dstShape = data[pos] >> 2, a = data[pos + 1], b = data[pos + 2], c = data[pos + 3], e = data[pos + 4];
         pos += 5;
         if (op == 2) { mvs_reset(d); continue; }
         if (op == 3) { fbw = a % (MAX_SIDE + 1); fbh = b % (MAX_SIDE + 1); continue; }
@@ -121,7 +131,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             w = c % (fbw - x + 2);
             h = e % (fbh - y + 2);
         }
-        decode(d, fbw, fbh, x, y, w, h, data + pos, len);
+        decode(d, fbw, fbh, x, y, w, h, data + pos, len, dstShape);
         pos += len;
     }
     mvs_free(d);
