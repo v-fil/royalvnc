@@ -20,10 +20,24 @@ extension VNCProtocol.UltraVNCMSLogonIIAuthentication {
         init?(agreement: DiffieHellmanKeyAgreement,
               username: String,
               password: String) {
+			self.init(secretKey: agreement.secretKey,
+					  publicKey: agreement.publicKey,
+					  username: username,
+					  password: password)
+		}
+
+		/// Encrypts the credential with the 8-byte shared secret of the key agreement.
+		/// Returns nil if the secret is not 8 bytes or a field cannot be encoded.
+		init?(secretKey key: Data,
+			  publicKey: Data,
+			  username: String,
+			  password: String) {
             let usernameLength = 256
             let passwordLength = 64
 
-			let key = agreement.secretKey
+			guard key.count == 8 else {
+				return nil
+			}
 
 			guard let encryptedUsername = Self.encrypt(string: username,
 													   length: usernameLength,
@@ -45,7 +59,7 @@ extension VNCProtocol.UltraVNCMSLogonIIAuthentication {
 			}
 
             self.encryptedCredential = credentialsData
-            self.publicKey = agreement.publicKey
+            self.publicKey = publicKey
         }
 	}
 }
@@ -97,8 +111,8 @@ private extension VNCProtocol.UltraVNCMSLogonIIAuthentication.Authentication {
 				}
 
 				encryptCBC(target: stringDataPtr,
-							 length: length,
-							 key: keyPtr)
+						   length: length,
+						   key: keyPtr)
 
 				return true
 			}
@@ -114,8 +128,8 @@ private extension VNCProtocol.UltraVNCMSLogonIIAuthentication.Authentication {
 	}
 
 	static func encryptCBC(target: UnsafeMutablePointer<UInt8>,
-							 length: Int,
-							 key: UnsafeMutablePointer<UInt8>) {
+						   length: Int,
+						   key: UnsafeMutablePointer<UInt8>) {
 		for idx in 0..<8 {
 			target[idx] ^= key[idx]
 		}

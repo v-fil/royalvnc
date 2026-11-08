@@ -8,10 +8,10 @@ import Foundation
 
 struct VNCDESEncryption {
 	/// DES-ECB with VNC's key convention. The key is the password's first 8 UTF-8 bytes,
-	/// zero-padded. Returns nil unless data is a whole number of 8-byte blocks.
+	/// zero-padded. Returns nil if data is empty or not a whole number of 8-byte blocks.
 	static func encrypt(data: Data,
 						key: String) -> Data? {
-		guard !data.isEmpty, data.count % 8 == 0 else {
+		guard !data.isEmpty, data.count.isMultiple(of: 8) else {
 			return nil
 		}
 

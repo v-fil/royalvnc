@@ -4,7 +4,7 @@
 
 RoyalVNC is a modern, high performance implementation of the [VNC/RFB protocol](https://github.com/rfbproto/rfbproto/blob/master/rfbproto.rst) written in Swift.
 The SDK (RoyalVNCKit) is compatible with Swift, Objective-C, C, C# and Kotlin on macOS, iOS, iPadOS, Android, Linux and Windows.
-It depends on [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift), [zlib](https://github.com/madler/zlib) and D3DES (see [Credits](#Credits)).
+It depends on [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift), [zlib](https://github.com/madler/zlib) and, on Linux, Windows and Android, [stb](https://github.com/troughton/Cstb) (see [Credits](#Credits)).
 
 ## This fork
 
@@ -12,9 +12,12 @@ A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen 
 
 `VNCConnection.probeServer(hostname:port:)` reads the protocol version and security types a server offers, without logging in, so a client can choose one login type (via `allowedAuthenticationTypes`) and keep it.
 
-The decoder's unit tests (C, AddressSanitizer + UBSan) run with `make -C Tests/CAppleMVSTests test`.
+DES, needed by the VNC password and MS-Logon II logins, is our own C code written from FIPS 46-3 (`Sources/CDES`, MIT), replacing upstream's D3DES, whose VNC changes carried a copyright with no licence. How a VNC password becomes the DES key, and what that means for non-ASCII passwords, is in [USAGE.md](USAGE.md#vnc-password-bytes).
 
-DES, needed by the VNC password and MS-Logon II logins, is our own C code written from FIPS 46-3 (`Sources/CDES`, MIT), replacing upstream's D3DES, whose VNC changes carried a copyright with no licence. Its tests run with `make -C Tests/CDESTests test`.
+Tests:
+- `swift test`: known-answer tests for the VNC password and MS-Logon II encryption (`Tests/RoyalVNCKitTests`). `Tests/Vectors/gen.c` prints their expected values from other DES implementations (macOS, needs LibVNCServer; build line in the file).
+- `make -C Tests/CDESTests test`: DES known answers and VNC-convention vectors (C, AddressSanitizer + UBSan).
+- `make -C Tests/CAppleMVSTests test`: the 1011 decoder (C, AddressSanitizer + UBSan).
 
 ## Supported Features
 

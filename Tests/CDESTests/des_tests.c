@@ -1,4 +1,4 @@
-/* DES unit tests: FIPS/NBS known answers, VNC-convention vectors, buffer handling. `make test`. */
+/* DES unit tests: standard DES known answers, VNC-convention vectors, buffer handling. `make test`. */
 #include <stdio.h>
 #include <string.h>
 
@@ -6,8 +6,9 @@
 
 typedef struct { uint8_t key[8], in[8], out[8]; } vector;
 
-/* Standard DES known answers (FIPS 46 worked example and NBS SP 500-20 sets). */
-static const vector fips[] = {
+/* Standard DES known answers: the worked example from J. Orlin Grabbe's "The DES Algorithm
+ * Illustrated" (first two) and NBS SP 500-20 sets. */
+static const vector standard[] = {
     { {0x13,0x34,0x57,0x79,0x9b,0xbc,0xdf,0xf1}, {0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef}, {0x85,0xe8,0x13,0x54,0x0f,0x0a,0xb4,0x05} },
     { {0x0e,0x32,0x92,0x32,0xea,0x6d,0x0d,0x73}, {0x87,0x87,0x87,0x87,0x87,0x87,0x87,0x87}, {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
     { {0x01,0x01,0x01,0x01,0x01,0x01,0x01,0x01}, {0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, {0x95,0xf8,0xa5,0xe5,0xdd,0x31,0xd9,0x00} },
@@ -84,6 +85,14 @@ static const vector vnc[] = {
     { {0x42,0x7c,0x91,0xb7,0x6a,0x8b,0x63,0x1e}, {0x3d,0x83,0x47,0xb4,0xa6,0xac,0x74,0xa9}, {0xc5,0xe8,0xb3,0x6b,0x6a,0xb6,0xe6,0xcf} },
 };
 
+/* FIPS PUB 81 Appendix B, Table B1: ECB, three blocks in one call. */
+static const uint8_t fips81_key[8] = {0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef};
+static const char fips81_text[] = "Now is the time for all "; /* 24 bytes, NUL unused */
+static const uint8_t fips81_out[24] = {
+    0x3f,0xa4,0x0e,0x8a,0x98,0x4d,0x48,0x15, 0x6a,0x27,0x17,0x87,0xab,0x88,0x83,0xf9,
+    0x89,0x3d,0x51,0xec,0x4b,0x56,0x3b,0x53,
+};
+
 static int failures;
 
 static void check(int ok, const char *what, int i) {
@@ -93,10 +102,15 @@ static void check(int ok, const char *what, int i) {
 int main(void) {
     uint8_t out[16];
 
-    for (int i = 0; i < (int)(sizeof fips / sizeof *fips); i++) {
-        rvnc_des_ecb_encrypt(fips[i].key, fips[i].in, out, 1);
-        check(!memcmp(out, fips[i].out, 8), "fips", i);
+    for (int i = 0; i < (int)(sizeof standard / sizeof *standard); i++) {
+        rvnc_des_ecb_encrypt(standard[i].key, standard[i].in, out, 1);
+        check(!memcmp(out, standard[i].out, 8), "standard", i);
     }
+
+    uint8_t three[24];
+    rvnc_des_ecb_encrypt(fips81_key, (const uint8_t *)fips81_text, three, 3);
+    check(!memcmp(three, fips81_out, 24), "FIPS 81 Table B1", 0);
+
     for (int i = 0; i < (int)(sizeof vnc / sizeof *vnc); i++) {
         rvnc_des_vnc_encrypt(vnc[i].key, vnc[i].in, out, 1);
         check(!memcmp(out, vnc[i].out, 8), "vnc", i);

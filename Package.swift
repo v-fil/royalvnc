@@ -108,6 +108,15 @@ let package = Package(
         .executableTarget(
             name: "RoyalVNCKitCDemo",
             dependencies: [ "RoyalVNCKit" ]
+        ),
+
+        // `swift test`: known-answer tests for the VNC password and MS-Logon II encryption
+        .testTarget(
+            name: "RoyalVNCKitTests",
+            dependencies: [ "RoyalVNCKit" ],
+            swiftSettings: [
+                .swiftLanguageMode(swiftLanguageMode)
+            ]
         )
     ]
 )

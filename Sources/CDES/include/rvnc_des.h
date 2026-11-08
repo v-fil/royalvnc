@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+
 #ifndef RVNC_DES_H
 #define RVNC_DES_H
 

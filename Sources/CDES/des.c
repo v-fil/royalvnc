@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+
 /* DES encryption, written from FIPS PUB 46-3. See rvnc_des.h.
  * Bit-by-bit permutations on 64-bit integers: slow next to table-driven DES, but a login
  * encrypts only a few blocks. Table entries are 1-based bit positions, bit 1 being the

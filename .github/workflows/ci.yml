@@ -25,7 +25,7 @@ jobs:
       matrix:
         include:
           - name: "Ubuntu ARM64"
-            os: ubuntu-24-arm64-gh
+            os: ubuntu-24.04-arm
             env:
               OS: "linux"
               NUGET_RID: "linux-arm64"
@@ -125,6 +125,21 @@ jobs:
       run: |
         swift package clean --configuration release
         swift build --configuration release
+
+    # unit tests
+
+    # GCC's AddressSanitizer loops (endless AddressSanitizer:DEADLYSIGNAL) with high mmap randomisation: https://github.com/actions/runner-images/issues/9524
+    - name: lower mmap randomisation for AddressSanitizer (Linux)
+      if: "success() && matrix.env.OS == 'linux'"
+      run: |
+        sudo sysctl -w vm.mmap_rnd_bits=28
+
+    - name: test RoyalVNCKit (non-Windows)
+      if: "success() && matrix.env.OS != 'windows'"
+      run: |
+        swift test
+        make -C Tests/CDESTests test
+        make -C Tests/CAppleMVSTests test
 
     # .NET bindings and NuGet package artifacts
 

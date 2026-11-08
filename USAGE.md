@@ -93,7 +93,8 @@ func connection(_ connection: VNCConnection,
     completion(credential)
 }
 ```
-- For a headless client, this is all that's needed to establish the connection and get notified about updates to it.
+- <a id="vnc-password-bytes"></a>VNC password bytes: the DES key is the password's first 8 UTF-8 bytes (exactly as given, no Unicode normalisation), zero-padded if shorter, with the high bit of each byte ignored (the VNC convention). A longer password is cut at byte 8, even inside a multibyte character. For a non-ASCII password, the server must end up with the same key from the bytes it stores; a server that stores passwords in Latin-1 or another encoding may derive a different key and reject it. ASCII passwords are the portable choice.
+- For a headless client, the steps above are all that's needed to establish the connection and get notified about updates to it.
 - To send input to the remote host, use one of the `VNCConnection`'s input APIs like `keyDown(_:)`, `keyUp(_:)`, `mouseButtonDown(_:x:y:)`, `mouseButtonUp(_:x:y:)`, etc.
 ```swift
 // Convert the string "abc" into VNCKeyCode's
