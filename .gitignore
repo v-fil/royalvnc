@@ -98,3 +98,13 @@ Tests/CAppleMVSTests/mvs_tests
 Tests/CAppleMVSTests/mvs_tests.dSYM/
 Tests/CDESTests/des_tests
 Tests/CDESTests/des_tests.dSYM/
+Tests/CAppleMVSFuzz/fuzz_mvs
+Tests/CAppleMVSFuzz/fuzz_mvs_replay
+Tests/CAppleMVSFuzz/seeds_gen
+Tests/CAppleMVSFuzz/*.dSYM/
+Tests/CAppleMVSFuzz/seeds/
+Tests/CAppleMVSFuzz/corpus/
+Tests/CAppleMVSFuzz/crash-*
+Tests/CAppleMVSFuzz/leak-*
+Tests/CAppleMVSFuzz/oom-*
+Tests/CAppleMVSFuzz/timeout-*

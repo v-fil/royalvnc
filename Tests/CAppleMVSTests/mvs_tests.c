@@ -426,6 +426,62 @@ static void test_malformed(void) {
         CHECK(mvs_blit_bgra(none, 0, 0, 1, 1, bgra, W * 4) == -1); /* no framebuffer */
         mvs_free(none);
     }
+
+    /* The precondition in mvs.h: the blit clips to the decoder's picture only, so dst must
+     * cover the region, and that is all it must cover. */
+    TEST("blit precondition: dst only has to reach the region's last pixel");
+    {
+        /* decoder picture 32x16, region 16,3 16x8 (a decoded rect), dst rows of 32 pixels
+         * plus 3 pixels of padding, allocated to end exactly at the region's last pixel */
+        s = sess_new(32, 16);
+        dec(&s, &P_FULL, 16, 3);
+        CHECK(s.rc == MVS_OK);
+        const int rx = 16, ry = 3, rw = W, rh = H, pad = 3;
+        for (int mode = 0; mode < 3; mode++) {
+            size_t bpp = mode == 1 ? 2 : 4, stride = (32 + pad) * bpp;
+            size_t size = (size_t)(ry + rh - 1) * stride + (size_t)(rx + rw) * bpp;
+            uint8_t *dst = malloc(size);
+            memset(dst, 0xAB, size);
+            int rc = mode == 0 ? mvs_blit_bgra(s.d, rx, ry, rw, rh, dst, stride)
+                   : mode == 1 ? mvs_blit(s.d, rx, ry, rw, rh, dst, stride, 16, 10, 5, 0, 31, 31, 31)
+                               : mvs_blit(s.d, rx, ry, rw, rh, dst, stride, 32, 16, 8, 0, 255, 255, 255);
+            CHECK(rc == 0);
+            int outside = 0, inside = 0;
+            for (size_t i = 0; i < size; i++) {
+                int row = (int)(i / stride), col = (int)(i % stride / bpp);
+                int in = row >= ry && row < ry + rh && col >= rx && col < rx + rw;
+                if (in) inside += dst[i] != 0xAB;
+                else outside += dst[i] != 0xAB;
+            }
+            CHECK(outside == 0);    /* nothing written outside the region */
+            CHECK(inside > 0);      /* the region itself was written */
+            free(dst);
+        }
+        mvs_free(s.d);
+    }
+
+    TEST("blit precondition: a region past the decoder's picture is clipped to it");
+    {
+        /* decoder picture 16x8, dst 32x16: of region 8,4 24x12 only 8,4 8x4 is written */
+        s = sess_new(W, H);
+        dec(&s, &P_FULL, 0, 0);
+        uint32_t big[32 * 16];
+        for (int mode = 0; mode < 2; mode++) {
+            for (int i = 0; i < 32 * 16; i++) big[i] = 0xABABABABu;
+            int rc = mode == 0 ? mvs_blit_bgra(s.d, 8, 4, 24, 12, big, 32 * 4)
+                               : mvs_blit(s.d, 8, 4, 24, 12, big, 32 * 4, 32, 16, 8, 0, 255, 255, 255);
+            CHECK(rc == 0);
+            int wrong = 0;
+            for (int y = 0; y < 16; y++)
+                for (int x = 0; x < 32; x++) {
+                    int in = x >= 8 && x < W && y >= 4 && y < H;
+                    uint32_t v = big[y * 32 + x];
+                    if (in ? v != (mode == 0 ? 0xFF949494u : 0x00949494u) : v != 0xABABABABu) wrong++;
+                }
+            CHECK(wrong == 0);
+        }
+        mvs_free(s.d);
+    }
 }
 int main(void) {
     build_packets();

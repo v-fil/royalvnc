@@ -17,7 +17,9 @@ DES, needed by the VNC password and MS-Logon II logins, is our own C code writte
 Tests:
 - `swift test`: known-answer tests for the VNC password and MS-Logon II encryption (`Tests/RoyalVNCKitTests`). `Tests/Vectors/gen.c` prints their expected values from other DES implementations (macOS, needs LibVNCServer; build line in the file). Also Apple's record layer: framing, filler, chaining, sequence numbers, the rekey and every failure, against vectors from `Tests/Vectors/apple_record_layer.py`, an oracle on OpenSSL's AES (needs Python's `cryptography`; usage in the file); and the whole client handshake against a scripted server on 127.0.0.1 (Apple platforms).
 - `make -C Tests/CDESTests test`: DES known answers and VNC-convention vectors (C, AddressSanitizer + UBSan).
-- `make -C Tests/CAppleMVSTests test`: the 1011 decoder (C, AddressSanitizer + UBSan).
+- `make -C Tests/CAppleMVSTests test`: the 1011 decoder (C, AddressSanitizer + UBSan), including the `mvs_blit` precondition: the destination only has to cover the region.
+- `make -C Tests/CAppleMVSFuzz replay`: the 1011 fuzz target (`fuzz_mvs.c`, sequences of rects, resets and size changes on one decoder) run once over a synthetic seed corpus and over `corpus/` if present (any C compiler, AddressSanitizer + UBSan).
+- `make -C Tests/CAppleMVSFuzz fuzz`: the same target under libFuzzer for `FUZZ_TIME` seconds (default 300), new inputs kept in `corpus/`. Needs a clang that ships libFuzzer; Apple's does not, so on macOS pass e.g. `FUZZ_CC="$(brew --prefix llvm)/bin/clang"`.
 
 ## Supported Features
 
