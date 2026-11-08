@@ -4,7 +4,7 @@ import FoundationEssentials
 import Foundation
 #endif
 
-@_implementationOnly import d3des
+@_implementationOnly import CDES
 
 extension VNCProtocol.UltraVNCMSLogonIIAuthentication {
 	struct Authentication {
@@ -96,7 +96,7 @@ private extension VNCProtocol.UltraVNCMSLogonIIAuthentication.Authentication {
 					return false
 				}
 
-				encryptD3DES(target: stringDataPtr,
+				encryptCBC(target: stringDataPtr,
 							 length: length,
 							 key: keyPtr)
 
@@ -113,7 +113,7 @@ private extension VNCProtocol.UltraVNCMSLogonIIAuthentication.Authentication {
 		return stringData
 	}
 
-	static func encryptD3DES(target: UnsafeMutablePointer<UInt8>,
+	static func encryptCBC(target: UnsafeMutablePointer<UInt8>,
 							 length: Int,
 							 key: UnsafeMutablePointer<UInt8>) {
 		for idx in 0..<8 {
@@ -141,12 +141,6 @@ private extension VNCProtocol.UltraVNCMSLogonIIAuthentication.Authentication {
 						   key: UnsafeMutablePointer<UInt8>,
 						   source: UnsafeMutablePointer<UInt8>,
 						   sourceLength: Int) {
-		deskey(key, EN0)
-
-		let eightByteBlocks = sourceLength / 8
-
-		for idx in 0..<eightByteBlocks {
-			des(source + idx * 8, target + idx * 8)
-		}
+		rvnc_des_vnc_encrypt(key, source, target, sourceLength / 8)
 	}
 }

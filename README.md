@@ -14,6 +14,8 @@ A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen 
 
 The decoder's unit tests (C, AddressSanitizer + UBSan) run with `make -C Tests/CAppleMVSTests test`.
 
+DES, needed by the VNC password and MS-Logon II logins, is our own C code written from FIPS 46-3 (`Sources/CDES`, MIT), replacing upstream's D3DES, whose VNC changes carried a copyright with no licence. Its tests run with `make -C Tests/CDESTests test`.
+
 ## Supported Features
 
 ### Security Types (Authentication Methods)
@@ -67,4 +69,3 @@ See [Usage](USAGE.md).
 - [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift) ([The CryptoSwift license](https://github.com/krzyzanowskim/CryptoSwift/blob/main/LICENSE))
 - [zlib](https://github.com/madler/zlib) ([zlib license](https://github.com/madler/zlib/blob/develop/LICENSE))
 - [stb](https://github.com/troughton/Cstb) ([public domain](https://github.com/troughton/Cstb/blob/main/LICENSE))
-- D3DES (Public Domain, Copyright Richard Outerbridge)

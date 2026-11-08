@@ -4,78 +4,34 @@ import FoundationEssentials
 import Foundation
 #endif
 
-@_implementationOnly import d3des
+@_implementationOnly import CDES
 
 struct VNCDESEncryption {
+	/// DES-ECB with VNC's key convention. The key is the password's first 8 UTF-8 bytes,
+	/// zero-padded. Returns nil unless data is a whole number of 8-byte blocks.
 	static func encrypt(data: Data,
 						key: String) -> Data? {
-		var data = data
-		var paddedKey = paddedKey(key)
-
-		let success = encrypt(data: &data,
-							  paddedKey: &paddedKey)
-
-		guard success else {
+		guard !data.isEmpty, data.count % 8 == 0 else {
 			return nil
 		}
 
-		return data
-	}
-}
+		var keyBytes = [UInt8](repeating: 0, count: 8)
 
-private extension VNCDESEncryption {
-	static func encrypt(data: inout Data,
-						paddedKey: inout Data) -> Bool {
-		let success = data.withUnsafeMutableBytes { encryptedDataPtr in
-			guard let encryptedDataBytes = encryptedDataPtr.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
-				return false
-			}
+		for (idx, byte) in key.utf8.prefix(8).enumerated() {
+			keyBytes[idx] = byte
+		}
 
-			return paddedKey.withUnsafeMutableBytes { paddedKeyPtr in
-				guard let paddedKeyBytes = paddedKeyPtr.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
-					return false
-				}
-
-				encrypt(dataBytes: encryptedDataBytes,
-						paddedKeyBytes: paddedKeyBytes)
-
-				return true
+		defer {
+			for idx in keyBytes.indices {
+				keyBytes[idx] = 0
 			}
 		}
 
-		return success
-	}
+		let input = [UInt8](data)
+		var output = [UInt8](repeating: 0, count: input.count)
 
-	static func paddedKey(_ key: String) -> Data {
-		let maxKeyLength = 8
-		let actualKeyLength = key.count
+		rvnc_des_vnc_encrypt(keyBytes, input, &output, input.count / 8)
 
-		var paddedKey = Data(count: maxKeyLength)
-
-		key.withCString { keyPtr in
-			// key is simply password padded with nulls
-			for idx in 0..<maxKeyLength {
-				if idx < actualKeyLength {
-					paddedKey[idx] = .init(keyPtr[idx])
-				} else {
-					paddedKey[idx] = 0
-				}
-			}
-		}
-
-		return paddedKey
-	}
-
-	static func encrypt(dataBytes: UnsafeMutablePointer<UInt8>,
-						paddedKeyBytes: UnsafeMutablePointer<UInt8>) {
-		let challengeSize = 16
-
-		deskey(paddedKeyBytes, EN0)
-
-		for challengeIdx in stride(from: 0, to: challengeSize, by: 8) {
-			let bytesAtOffset = dataBytes.advanced(by: challengeIdx)
-
-			des(bytesAtOffset, bytesAtOffset)
-		}
+		return Data(output)
 	}
 }

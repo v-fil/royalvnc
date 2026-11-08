@@ -23,8 +23,6 @@ zTarget = Target.target(name: "Z", linkerSettings: [
 ])
 #endif
 
-let d3desTarget = Target.target(name: "d3des")
-
 let package = Package(
     name: "RoyalVNCKit",
 
@@ -68,6 +66,11 @@ let package = Package(
             ]
         ),
 
+        // DES for the VNC password and MS-Logon II logins
+        .target(
+            name: "CDES"
+        ),
+
         // Apple encoding 1011 decoder (MPL 2.0, see its file headers)
         .target(
             name: "CAppleMVS"
@@ -80,7 +83,7 @@ let package = Package(
                 "RoyalVNCKitC",
                 "CAppleMVS",
                 "CModExp",
-                .byName(name: d3desTarget.name),
+                "CDES",
                 .byName(name: zTarget.name),
                 .byName(name: "CryptoSwift"),
                 .product(name: "stb_image", package: "Cstb", condition: .when(platforms: [ .linux, .windows, .android ]))
@@ -95,7 +98,6 @@ let package = Package(
             ]
         ),
 
-        d3desTarget,
         zTarget,
 
         .executableTarget(
