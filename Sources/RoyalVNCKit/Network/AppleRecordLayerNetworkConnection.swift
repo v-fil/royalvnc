@@ -6,8 +6,8 @@ import Foundation
 
 import Dispatch
 
-/// Forwards to another connection, in the clear until `startRecordLayer(keys:)`, then through
-/// Apple's record layer (`AppleRecordLayer`) in both directions.
+/// Forwards to another connection, in the clear until `startRecordLayer(keys:backend:)`, then
+/// through Apple's record layer (`AppleRecordLayer`) in both directions.
 ///
 /// Reads come from one task at a time. Writes may come from several: each one is a whole
 /// message, sealed and handed to the base connection in one order, so the records reach the
@@ -54,8 +54,10 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 		return opener != nil
 	}
 
-	/// Everything read and written from now on goes through the record layer. Waits for writes
-	/// under way. Call it after reading the rekey, before reading anything else; only once.
+	/// Everything read and written from now on goes through the record layer. Call it after
+	/// reading the rekey, before reading anything else; only once. It takes the write gate, so
+	/// a write under way finishes in the clear first and every later one is a record: without
+	/// it, a write racing the start could seal or send out of order.
 	func startRecordLayer(keys: AppleRecordLayer.Keys,
 						  backend: AppleRecordCrypto.Backend = .preferred) async {
 		await writeGate.enter()
@@ -94,6 +96,9 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 
 		do {
 			while pending.count - pendingStart < max(minimumLength, 1) {
+				// A write may have failed meanwhile: stop at the next record.
+				_ = try currentOpener()
+
 				try await readRecord(opener: opener)
 			}
 		} catch {

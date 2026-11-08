@@ -22,6 +22,8 @@ extension VNCConnection {
 	/// After ServerInit, before any other client message: starts the record layer on
 	/// `connection`. Any failure ends the session.
 	func startAppleSessionEncryption(wrapKey: [UInt8]) async throws {
+		logger.logDebug("Sending SetEncryption, then waiting for the session key")
+
 		let arrival = try await Self.startAppleSessionEncryption(
 			connection: connection,
 			wrapKey: wrapKey,

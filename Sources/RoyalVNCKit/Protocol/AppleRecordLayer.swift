@@ -71,7 +71,7 @@ enum AppleRecordLayer {
 	static let minimumRecordLength = recordLength(bodyLength: 0)
 
 	/// The key and IV a rekey installs. Swift arrays can't be reliably wiped, so the keys stay in
-	/// memory until it is reused.
+	/// memory until that memory is reused.
 	struct Keys: Equatable {
 		let key: [UInt8]
 		let iv: [UInt8]

@@ -8,23 +8,6 @@ import XCTest
 // the type-30 login, the cleartext prelude, the rekey and the records after it, and the
 // sessions that must stay in the clear.
 
-private typealias Vectors = AppleRecordLayerVectors
-
-private func bytes(_ hex: String) -> [UInt8] {
-	var result = [UInt8]()
-	var index = hex.startIndex
-
-	while index < hex.endIndex {
-		let next = hex.index(index, offsetBy: 2)
-		result.append(UInt8(hex[index..<next], radix: 16)!)
-		index = next
-	}
-
-	return result
-}
-
-private let sessionKeys = AppleRecordLayer.Keys(key: bytes(Vectors.key), iv: bytes(Vectors.iv))
-
 /// A listener on 127.0.0.1 that hands over its first connection.
 private final class ScriptedServer {
 	private let listener: NWListener
@@ -164,8 +147,11 @@ private final class Delegate: VNCConnectionDelegate {
 
 final class AppleSessionEncryptionHandshakeTests: XCTestCase {
 	private var server: ScriptedServer!
+	private var peerWatchdog: Task<Void, Never>?
 
 	override func tearDown() {
+		peerWatchdog?.cancel()
+		peerWatchdog = nil
 		server?.stop()
 		server = nil
 	}
@@ -200,8 +186,9 @@ final class AppleSessionEncryptionHandshakeTests: XCTestCase {
 
 		// A client that stops sending fails the test instead of hanging it: pending receives
 		// end once the connection is cancelled.
-		Task {
-			try await Task.sleep(nanoseconds: 15_000_000_000)
+		peerWatchdog?.cancel()
+		peerWatchdog = Task {
+			guard (try? await Task.sleep(nanoseconds: 15_000_000_000)) != nil else { return }
 
 			peer.cancel()
 		}
@@ -262,7 +249,7 @@ final class AppleSessionEncryptionHandshakeTests: XCTestCase {
 
 	private func rekeyUpdate(wrapKey: [UInt8]) -> [UInt8] {
 		[0x00, 0x00, 0x00, 0x01] + [UInt8](repeating: 0, count: 8) + [0x00, 0x00, 0x04, 0x4f] +
-			[0, 0, 0, 1] + wrapped(sessionKeys.key, key: wrapKey) + wrapped(sessionKeys.iv, key: wrapKey)
+			[0, 0, 0, 1] + wrapped(keys.key, key: wrapKey) + wrapped(keys.iv, key: wrapKey)
 	}
 
 	private func encryptionError(_ error: Error?) -> VNCError.AppleSessionEncryptionError? {
@@ -286,7 +273,7 @@ final class AppleSessionEncryptionHandshakeTests: XCTestCase {
 
 			// Everything after it comes in records: SetPixelFormat, SetEncodings, an update
 			// request and, with the pasteboard, the fetch the notice asked for.
-			let opener = AppleRecordLayer.Opener(keys: sessionKeys)
+			let opener = AppleRecordLayer.Opener(keys: keys)
 
 			var expected: [UInt8] = [0x00, 0x02, 0x03]
 
@@ -302,7 +289,7 @@ final class AppleSessionEncryptionHandshakeTests: XCTestCase {
 			XCTAssertTrue(client.isSessionEncrypted)
 
 			// An empty update, sealed: the client decrypts it and asks for the next one.
-			let sealer = AppleRecordLayer.Sealer(keys: sessionKeys)
+			let sealer = AppleRecordLayer.Sealer(keys: keys)
 
 			try await peer.send(try sealer.seal([0, 0, 0, 0]))
 
