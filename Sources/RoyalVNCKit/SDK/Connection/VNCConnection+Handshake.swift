@@ -185,8 +185,13 @@ private extension VNCConnection {
 
 		let credential = try await askDelegateForUsernamePasswordCredential(authenticationType: auth.authenticationType)
 
-		try await auth.send(connection: connection,
-							credential: credential)
+		let wrapKey = try await auth.send(connection: connection,
+										  credential: credential)
+
+		if isAppleSessionEncryptionEnabled,
+		   state.isAppleRemoteDesktop {
+			state.appleRecordLayerWrapKey = wrapKey
+		}
 	}
 
 	func performUltraVNCMSLogonIIAuthentication() async throws {
@@ -274,6 +279,12 @@ private extension VNCConnection {
 
 		state.serverPixelFormat = serverPixelFormat
 		state.pixelFormat = clientPixelFormat
+
+		if let wrapKey = state.appleRecordLayerWrapKey {
+			state.appleRecordLayerWrapKey = nil
+
+			try await startAppleSessionEncryption(wrapKey: wrapKey)
+		}
 
 		do {
 			try await sendSetPixelFormat(clientPixelFormat)

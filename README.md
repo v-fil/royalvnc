@@ -8,14 +8,14 @@ It depends on [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift), [zlib
 
 ## This fork
 
-A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen Sharing support: encodings 1011 and 1001, SetServerScaling, and Apple's clipboard messages. The 1011 decoder in `Sources/CAppleMVS` is a C port of [noVNC-ARD](https://github.com/peetinc/noVNC-ARD) and, like it, is under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/) (see its file headers); everything else stays MIT.
+A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen Sharing support: encodings 1011 and 1001, SetServerScaling, Apple's clipboard messages, and session encryption after the Apple Remote Desktop login (see [USAGE.md](USAGE.md#apple-session-encryption)). The 1011 decoder in `Sources/CAppleMVS` is a C port of [noVNC-ARD](https://github.com/peetinc/noVNC-ARD) and, like it, is under the [Mozilla Public License 2.0](https://mozilla.org/MPL/2.0/) (see its file headers); everything else stays MIT.
 
 `VNCConnection.probeServer(hostname:port:)` reads the protocol version and security types a server offers, without logging in, so a client can choose one login type (via `allowedAuthenticationTypes`) and keep it.
 
 DES, needed by the VNC password and MS-Logon II logins, is our own C code written from FIPS 46-3 (`Sources/CDES`, MIT), replacing upstream's D3DES, whose VNC changes carried a copyright with no licence. How a VNC password becomes the DES key, and what that means for non-ASCII passwords, is in [USAGE.md](USAGE.md#vnc-password-bytes).
 
 Tests:
-- `swift test`: known-answer tests for the VNC password and MS-Logon II encryption (`Tests/RoyalVNCKitTests`). `Tests/Vectors/gen.c` prints their expected values from other DES implementations (macOS, needs LibVNCServer; build line in the file).
+- `swift test`: known-answer tests for the VNC password and MS-Logon II encryption (`Tests/RoyalVNCKitTests`). `Tests/Vectors/gen.c` prints their expected values from other DES implementations (macOS, needs LibVNCServer; build line in the file). Also Apple's record layer: framing, filler, chaining, sequence numbers, the rekey and every failure, against vectors from `Tests/Vectors/apple_record_layer.py`, an oracle on OpenSSL's AES (needs Python's `cryptography`; usage in the file).
 - `make -C Tests/CDESTests test`: DES known answers and VNC-convention vectors (C, AddressSanitizer + UBSan).
 - `make -C Tests/CAppleMVSTests test`: the 1011 decoder (C, AddressSanitizer + UBSan).
 
@@ -69,6 +69,7 @@ See [Usage](USAGE.md).
 [MIT License](LICENSE)
 
 ## Credits
+- Apple's session encryption (`AppleRecordLayer`) follows the description and tests of [remotex](https://github.com/andrewtheguy/remotex) (`docs/apple-vnc-889.md`, `src/vnc_record.rs`; MIT, Copyright (c) 2026 Andrew Chen, [license](https://github.com/andrewtheguy/remotex/blob/main/LICENSE))
 - [CryptoSwift](https://github.com/krzyzanowskim/CryptoSwift) ([The CryptoSwift license](https://github.com/krzyzanowskim/CryptoSwift/blob/main/LICENSE))
 - [zlib](https://github.com/madler/zlib) ([zlib license](https://github.com/madler/zlib/blob/develop/LICENSE))
 - [stb](https://github.com/troughton/Cstb) ([public domain](https://github.com/troughton/Cstb/blob/main/LICENSE))

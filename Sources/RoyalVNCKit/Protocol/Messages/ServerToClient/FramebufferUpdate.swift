@@ -52,6 +52,11 @@ extension VNCProtocol.FramebufferUpdate {
 
 			let encodingType = rectangle.encodingType
 
+			// The record layer takes one key, at the start (AppleRecordLayer).
+			guard encodingType != AppleRecordLayer.rekeyEncodingType else {
+				throw VNCError.protocol(.appleSessionEncryption(.unexpectedRekey))
+			}
+
 			guard let encoding = encodings[.init(encodingType)] else {
 				throw VNCError.protocol(.unsupportedEncoding(encodingType: .init(encodingType)))
 			}

@@ -26,6 +26,7 @@ public extension VNCError {
 		case zrlePaletteRLELengthOverflow
 		case zrleUnexpectedRLEStreamEnd
 		case unexpectedExtendedServerCutTextAction(action: UInt32)
+		case appleSessionEncryption(_ underlyingError: AppleSessionEncryptionError)
 
 		// MARK: - LocalizedError
 		public var errorDescription: String? {
@@ -73,6 +74,8 @@ public extension VNCError {
 					return "End of stream reached while reading ZRLE RLE run-length."
 				case .unexpectedExtendedServerCutTextAction(let action):
 					return "An unexpected ExtendedServerCutText Action (\(action)) was retrieved."
+				case .appleSessionEncryption(let underlyingError):
+					return underlyingError.errorDescription
 			}
 		}
 	}

@@ -39,13 +39,19 @@ public extension VNCConnection {
 	}
 
 	var statistics: Statistics {
-		.init(bytesReceived: connection.bytesReceived,
+		.init(bytesReceived: connection.base.bytesReceived,
 			  secondsHandlingMessages: state.secondsHandlingMessages)
 	}
 
 	/// Whether the server is Apple Screen Sharing (RFB 3.889). Known after the handshake.
 	var isAppleServer: Bool {
 		state.isAppleRemoteDesktop
+	}
+
+	/// Whether the session runs inside Apple's record layer (`isAppleSessionEncryptionEnabled`).
+	/// Known when the connection is connected. Any thread.
+	var isSessionEncrypted: Bool {
+		connection.isRecordLayerActive
 	}
 
 	/// The size the server announced in ServerInit.

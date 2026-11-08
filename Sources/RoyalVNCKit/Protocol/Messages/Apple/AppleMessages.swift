@@ -47,6 +47,14 @@ extension AppleClientMessage {
 	/// AutoPasteboard (0x15): announce pasteboard changes.
 	static let autoPasteboardStart = Self(data: .init([0x15, 0, 0, 1, 0, 0, 0, 0]))
 
+	/// SetEncryption (0x12) command 1: asks for a rekey with method 1 (AES-128). The server
+	/// answers with the rekey (`AppleRecordLayer`).
+	static let setEncryptionRequestRekey = Self(data: .init([0x12, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1]))
+
+	/// SetEncryption (0x12) command 2 with 1: the server decrypts what it receives once its
+	/// rekey is out.
+	static let setEncryptionDecryptReceived = Self(data: .init([0x12, 0, 0, 2, 0, 1, 0, 0]))
+
 	/// Pasteboard fetch (0x0b): the server answers with pasteboard contents (0x1f).
 	static let pasteboardFetch = Self(data: .init([0x0b, 0, 0, 0, 0, 0, 0, 0]))
 

@@ -27,6 +27,10 @@ extension VNCConnection {
 		var areContinuousUpdatesSupported = false
 		var areContinuousUpdatesEnabled = false
 
+		/// The key that wraps Apple's first rekey, from the login. Handshake only; cleared once
+		/// used.
+		var appleRecordLayerWrapKey: [UInt8]?
+
 		/// An Apple pasteboard fetch is outstanding: only its answer is taken.
 		var isApplePasteboardFetchPending = false
 

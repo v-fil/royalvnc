@@ -13,17 +13,22 @@ extension VNCProtocol.ARDAuthentication {
         let cipherText: Data
         let publicKey: Data
 
+        /// The key that wraps Apple's first rekey (`AppleRecordLayer`).
+        let recordLayerWrapKey: [UInt8]
+
         private init(cipherText: Data,
-                     publicKey: Data) {
+                     publicKey: Data,
+                     recordLayerWrapKey: [UInt8]) {
             self.cipherText = cipherText
             self.publicKey = publicKey
+            self.recordLayerWrapKey = recordLayerWrapKey
         }
 
         init?(agreement: DiffieHellmanKeyAgreement,
               username: String,
               password: String) {
             // Get MD5 hash of shared secret
-			let secretHash = agreement.secretKey.md5Hash()
+			let secretHash = Data(AppleRecordLayer.wrapKey(diffieHellmanSharedSecret: agreement.secretKey))
 
             // ciphertext: AES128(shared, username[64]:password[64])
             let credArraySize = 128
@@ -68,7 +73,8 @@ extension VNCProtocol.ARDAuthentication {
 			}
 
             self.init(cipherText: cipherText,
-                      publicKey: agreement.publicKey)
+                      publicKey: agreement.publicKey,
+                      recordLayerWrapKey: Array(secretHash))
         }
     }
 }

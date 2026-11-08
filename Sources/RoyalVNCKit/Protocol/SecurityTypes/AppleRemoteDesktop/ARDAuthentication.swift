@@ -63,8 +63,11 @@ extension VNCProtocol.ARDAuthentication {
 		return auth
 	}
 
+	/// Sends the login. Returns the key that wraps Apple's first rekey (MD5 of the shared
+	/// secret).
+	@discardableResult
 	func send(connection: NetworkConnectionWriting,
-			  credential: VNCUsernamePasswordCredential) async throws {
+			  credential: VNCUsernamePasswordCredential) async throws -> [UInt8] {
 		let authentication = try authenticate(credential: credential)
 
 		let cipherText = authentication.cipherText
@@ -73,6 +76,8 @@ extension VNCProtocol.ARDAuthentication {
 		try await Self.sendResponse(connection: connection,
 									cipherText: cipherText,
 									publicKey: publicKey)
+
+		return authentication.recordLayerWrapKey
 	}
 }
 

@@ -33,6 +33,14 @@ public final class VNCConnection: NSObjectOrAnyObject {
 	/// asks for pasteboard change notices. Set before `connect()`.
 	public var forwardsServerClipboard = false
 
+	/// Encrypt the session with an Apple Screen Sharing server after an Apple Remote Desktop
+	/// login (type 30): AES-128-CBC records with a SHA-1 integrity trailer, keyed by the server
+	/// over the login's Diffie-Hellman secret. It hides the session from a passive listener;
+	/// it does not authenticate the server. Once asked for, the session never continues in the
+	/// clear: if the server does not answer or a record fails, it ends. Other servers and
+	/// login types are not affected. Set before `connect()`.
+	public var isAppleSessionEncryptionEnabled = true
+
 #if canImport(ObjectiveC)
 	@objc
 #endif
@@ -86,12 +94,12 @@ public final class VNCConnection: NSObjectOrAnyObject {
     typealias BaseNetworkConnection = SocketNetworkConnection
 #endif
 
-    lazy var connection: CountingNetworkConnection<BaseNetworkConnection> = {
+    lazy var connection: AppleRecordLayerNetworkConnection<CountingNetworkConnection<BaseNetworkConnection>> = {
         let connectionSettings = NetworkConnectionSettings(connectionTimeout: 15,
                                                            host: settings.hostname,
                                                            port: settings.port)
 
-        let connection = CountingNetworkConnection<BaseNetworkConnection>(settings: connectionSettings)
+        let connection = AppleRecordLayerNetworkConnection<CountingNetworkConnection<BaseNetworkConnection>>(settings: connectionSettings)
 
         connection.setStatusUpdateHandler(connectionStatusDidChange)
 
@@ -390,7 +398,9 @@ private extension VNCConnection {
 
 			updateConnectionState(.connected)
 
+			// With session encryption these went out in the clear before it started.
 			if state.isAppleRemoteDesktop,
+			   !connection.isRecordLayerActive,
 			   forwardsServerClipboard || settings.isClipboardRedirectionEnabled {
 				enqueueClientToServerMessage(AppleClientMessage.viewerInfo)
 				enqueueClientToServerMessage(AppleClientMessage.setModeControl)
