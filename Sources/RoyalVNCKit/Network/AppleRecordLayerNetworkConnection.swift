@@ -11,8 +11,13 @@ import Dispatch
 ///
 /// Reads come from one task at a time. Writes may come from several: each one is a whole
 /// message, sealed and handed to the base connection in one order, so the records reach the
-/// wire in the order of their sequence numbers. Once a record fails, every later read and
-/// write throws.
+/// wire in the order of their sequence numbers. An empty write sends nothing.
+///
+/// Once the record layer is on, any failure (a bad record, sealing, or the base connection
+/// failing a read or a write) is final for both directions: every later read and write throws,
+/// bytes already decrypted included. The record layer stays installed, so nothing can go out
+/// in the clear afterwards. Closing the connection is up to the owner (`VNCConnection` does on
+/// any error).
 final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkConnection {
 	let base: Base
 
@@ -24,6 +29,7 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 
 	private var sealer: AppleRecordLayer.Sealer?
 	private var opener: AppleRecordLayer.Opener?
+	private var hasFailed = false
 
 	/// Writes in order, one at a time.
 	private let writeGate = AsyncSerialGate()
@@ -40,7 +46,7 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 		self.init(base: Base(settings: settings))
 	}
 
-	/// Whether the record layer carries the connection. Any thread.
+	/// Whether the record layer carries the connection; still true after it failed. Any thread.
 	var isRecordLayerActive: Bool {
 		lock.lock()
 		defer { lock.unlock() }
@@ -48,22 +54,15 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 		return opener != nil
 	}
 
-	/// Everything read and written from now on goes through the record layer. Call it after
-	/// reading the rekey, before writing anything else; only once.
-	func startRecordLayer(keys: AppleRecordLayer.Keys) {
-		startRecordLayer(sealer: .init(keys: keys),
-						 opener: .init(keys: keys))
-	}
+	/// Everything read and written from now on goes through the record layer. Waits for writes
+	/// under way. Call it after reading the rekey, before reading anything else; only once.
+	func startRecordLayer(keys: AppleRecordLayer.Keys,
+						  backend: AppleRecordCrypto.Backend = .preferred) async {
+		await writeGate.enter()
+		defer { writeGate.leave() }
 
-	func startRecordLayer(sealer: AppleRecordLayer.Sealer,
-						  opener: AppleRecordLayer.Opener) {
-		lock.lock()
-		defer { lock.unlock() }
-
-		precondition(self.opener == nil, "The record layer was started twice")
-
-		self.sealer = sealer
-		self.opener = opener
+		install(sealer: .init(direction: .init(keys: keys, backend: backend)),
+				opener: .init(direction: .init(keys: keys, backend: backend)))
 	}
 
 	var status: NetworkConnectionStatus { base.status }
@@ -83,7 +82,7 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 
 	func read(minimumLength: Int,
 			  maximumLength: Int) async throws -> Data {
-		guard let opener = currentOpener() else {
+		guard let opener = try currentOpener() else {
 			return try await base.read(minimumLength: minimumLength,
 									   maximumLength: maximumLength)
 		}
@@ -93,8 +92,14 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 			throw VNCError.protocol(.invalidData)
 		}
 
-		while pending.count - pendingStart < max(minimumLength, 1) {
-			try await readRecord(opener: opener)
+		do {
+			while pending.count - pendingStart < max(minimumLength, 1) {
+				try await readRecord(opener: opener)
+			}
+		} catch {
+			markFailed()
+
+			throw error
 		}
 
 		let count = min(maximumLength, pending.count - pendingStart)
@@ -114,62 +119,81 @@ final class AppleRecordLayerNetworkConnection<Base: NetworkConnection>: NetworkC
 		await writeGate.enter()
 		defer { writeGate.leave() }
 
-		guard let sealer = currentSealer() else {
+		guard let sealer = try currentSealer() else {
 			try await base.write(data: data)
 
 			return
 		}
 
-		// Records carry messages; there is no empty message to send.
 		guard !data.isEmpty else { return }
 
-		let records = try sealer.seal(Array(data))
+		do {
+			let records = try sealer.seal(Array(data))
 
-		try await base.write(data: Data(records))
+			try await base.write(data: Data(records))
+		} catch {
+			markFailed()
+
+			throw error
+		}
 	}
 }
 
 private extension AppleRecordLayerNetworkConnection {
-	func currentOpener() -> AppleRecordLayer.Opener? {
+	/// The opener, nil before the record layer starts. Throws once it has failed.
+	func currentOpener() throws -> AppleRecordLayer.Opener? {
 		lock.lock()
 		defer { lock.unlock() }
+
+		guard !hasFailed else {
+			throw VNCError.protocol(.appleSessionEncryption(.failed))
+		}
 
 		return opener
 	}
 
-	func currentSealer() -> AppleRecordLayer.Sealer? {
+	/// The sealer, nil before the record layer starts. Throws once it has failed.
+	func currentSealer() throws -> AppleRecordLayer.Sealer? {
 		lock.lock()
 		defer { lock.unlock() }
+
+		guard !hasFailed else {
+			throw VNCError.protocol(.appleSessionEncryption(.failed))
+		}
 
 		return sealer
 	}
 
-	/// Reads, checks and appends one record's body. Any failure, the connection's included,
-	/// ends the record layer: the stream can't be picked up mid-record.
+	func install(sealer: AppleRecordLayer.Sealer,
+				 opener: AppleRecordLayer.Opener) {
+		lock.lock()
+		defer { lock.unlock() }
+
+		precondition(self.opener == nil, "The record layer was started twice")
+
+		self.sealer = sealer
+		self.opener = opener
+	}
+
+	func markFailed() {
+		lock.lock()
+		hasFailed = true
+		lock.unlock()
+	}
+
+	/// Reads, checks and appends one record's body.
 	func readRecord(opener: AppleRecordLayer.Opener) async throws {
-		guard !opener.hasFailed else {
-			throw VNCError.protocol(.appleSessionEncryption(.failed))
+		let length = Int(try await base.readUInt16())
+
+		guard AppleRecordLayer.isValidRecordLength(length) else {
+			throw VNCError.protocol(.appleSessionEncryption(.invalidRecordLength(length: length)))
 		}
 
-		let body: [UInt8]
+		let ciphertext = try await base.readBuffered(length: length,
+													 minimumChunkSize: 1,
+													 maximumChunkSize: length)
 
-		do {
-			let length = Int(try await base.readUInt16())
-
-			guard AppleRecordLayer.isValidRecordLength(length) else {
-				throw VNCError.protocol(.appleSessionEncryption(.invalidRecordLength(length: length)))
-			}
-
-			let ciphertext = try await base.readBuffered(length: length,
-														 minimumChunkSize: 1,
-														 maximumChunkSize: length)
-
-			body = try opener.open(Array(ciphertext))
-		} catch {
-			opener.fail()
-
-			throw error
-		}
+		let body = try opener.open(Array(ciphertext))
 
 		if pendingStart > 0 {
 			pending.removeFirst(pendingStart)
@@ -177,49 +201,5 @@ private extension AppleRecordLayerNetworkConnection {
 		}
 
 		pending += body
-	}
-}
-
-/// An async lock that lets one task in at a time, in the order they arrived.
-final class AsyncSerialGate {
-#if canImport(Glibc) || canImport(Android) || canImport(WinSDK)
-	private let lock = Spinlock()
-#else
-	private let lock = NSLock()
-#endif
-
-	private var isBusy = false
-	private var waiters = [CheckedContinuation<Void, Never>]()
-
-	func enter() async {
-		await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-			lock.lock()
-
-			if isBusy {
-				waiters.append(continuation)
-				lock.unlock()
-			} else {
-				isBusy = true
-				lock.unlock()
-
-				continuation.resume()
-			}
-		}
-	}
-
-	func leave() {
-		lock.lock()
-
-		guard !waiters.isEmpty else {
-			isBusy = false
-			lock.unlock()
-
-			return
-		}
-
-		let next = waiters.removeFirst()
-		lock.unlock()
-
-		next.resume()
 	}
 }

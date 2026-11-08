@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import RoyalVNCKit
 
@@ -27,7 +28,9 @@ private func bytes(_ hex: String) -> [UInt8] {
 }
 
 private func hex(_ bytes: [UInt8]) -> String {
-	bytes.map { String(format: "%02x", $0) }.joined()
+	let digits = Array("0123456789abcdef")
+
+	return String(bytes.flatMap { [digits[Int($0 >> 4)], digits[Int($0 & 0x0f)]] })
 }
 
 private let backends = AppleRecordCrypto.Backend.allCases.filter(\.isAvailable)
@@ -87,53 +90,93 @@ private func records(_ wire: [UInt8]) -> [[UInt8]] {
 	return result
 }
 
-/// An in-memory connection: reads hand out `incoming` at most `chunk` bytes at a time and fail
-/// as closed at its end; writes collect in `written`, optionally after yielding.
+/// An in-memory connection: reads hand out `incoming` at most `chunk` bytes at a time. At its
+/// end they fail as closed, or, with `waitsAtEnd`, wait until `cancel()`. Writes collect in
+/// `written`, optionally after yielding; `failsFirstWrite` fails the first one.
 private final class MemoryConnection: NetworkConnection {
-	private var incoming: [UInt8]
-	private var offset = 0
+	private let incoming: [UInt8]
 	private let chunk: Int
 	private let yieldsBeforeWriting: Bool
+	private let waitsAtEnd: Bool
+	private let failsFirstWrite: Bool
 
 	private let lock = NSLock()
+	private var offset = 0
 	private var writtenBytes = [UInt8]()
+	private var writeAttempts = 0
+	private var isCancelled = false
+	private var waiter: CheckedContinuation<Void, Never>?
 
-	init(incoming: [UInt8] = [], chunk: Int = .max, yieldsBeforeWriting: Bool = false) {
+	init(incoming: [UInt8] = [],
+		 chunk: Int = .max,
+		 yieldsBeforeWriting: Bool = false,
+		 waitsAtEnd: Bool = false,
+		 failsFirstWrite: Bool = false) {
 		self.incoming = incoming
 		self.chunk = chunk
 		self.yieldsBeforeWriting = yieldsBeforeWriting
+		self.waitsAtEnd = waitsAtEnd
+		self.failsFirstWrite = failsFirstWrite
 	}
 
 	convenience init(settings: NetworkConnectionSettings) {
 		self.init()
 	}
 
-	var remaining: Int { incoming.count - offset }
+	var remaining: Int {
+		locked { incoming.count - offset }
+	}
 
 	var written: [UInt8] {
-		lock.lock()
-		defer { lock.unlock() }
-
-		return writtenBytes
+		locked { writtenBytes }
 	}
 
 	var status: NetworkConnectionStatus { .ready }
 	var isReady: Bool { true }
 
 	func setStatusUpdateHandler(_ statusUpdateHandler: NetworkConnectionStatusUpdateHandler?) { }
-	func cancel() { }
 	func start(queue: DispatchQueue) { }
 
-	func read(minimumLength: Int, maximumLength: Int) async throws -> Data {
-		let count = min(maximumLength, max(minimumLength, min(chunk, remaining)))
+	func cancel() {
+		let waiter: CheckedContinuation<Void, Never>? = locked {
+			isCancelled = true
+			defer { self.waiter = nil }
 
-		guard count > 0, count <= remaining else {
-			throw VNCError.connection(.closed)
+			return self.waiter
 		}
 
-		defer { offset += count }
+		waiter?.resume()
+	}
 
-		return Data(incoming[offset..<(offset + count)])
+	func read(minimumLength: Int, maximumLength: Int) async throws -> Data {
+		if waitsAtEnd, remaining < max(minimumLength, 1) {
+			await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+				let resumeNow: Bool = locked {
+					guard !isCancelled else { return true }
+
+					waiter = continuation
+
+					return false
+				}
+
+				if resumeNow { continuation.resume() }
+			}
+
+			throw VNCError.connection(.cancelled)
+		}
+
+		return try locked {
+			let available = incoming.count - offset
+			let count = min(maximumLength, max(minimumLength, min(chunk, available)))
+
+			guard count > 0, count <= available else {
+				throw VNCError.connection(.closed)
+			}
+
+			defer { offset += count }
+
+			return Data(incoming[offset..<(offset + count)])
+		}
 	}
 
 	func write(data: Data) async throws {
@@ -143,13 +186,22 @@ private final class MemoryConnection: NetworkConnection {
 			}
 		}
 
-		append(Array(data))
+		try locked {
+			writeAttempts += 1
+
+			if failsFirstWrite, writeAttempts == 1 {
+				throw VNCError.connection(.closed)
+			}
+
+			writtenBytes += data
+		}
 	}
 
-	private func append(_ data: [UInt8]) {
+	private func locked<T>(_ body: () throws -> T) rethrows -> T {
 		lock.lock()
-		writtenBytes += data
-		lock.unlock()
+		defer { lock.unlock() }
+
+		return try body()
 	}
 }
 
@@ -187,6 +239,28 @@ final class AppleRecordLayerSizeTests: XCTestCase {
 	func testSetEncryptionMessages() {
 		XCTAssertEqual(hex(Array(AppleClientMessage.setEncryptionRequestRekey.data)), "120000010001000100000001")
 		XCTAssertEqual(hex(Array(AppleClientMessage.setEncryptionDecryptReceived.data)), "1200000200010000")
+	}
+}
+
+// MARK: - Comparison
+final class AppleRecordCryptoComparisonTests: XCTestCase {
+	func testConstantTimeEqual() {
+		let value = (0..<20).map { UInt8($0) }
+
+		XCTAssertTrue(AppleRecordCrypto.constantTimeEqual(value[...], value))
+		XCTAssertTrue(AppleRecordCrypto.constantTimeEqual([][...], []))
+
+		for index in value.indices {
+			var other = value
+			other[index] ^= 0x80
+
+			XCTAssertFalse(AppleRecordCrypto.constantTimeEqual(value[...], other), "byte \(index)")
+		}
+
+		XCTAssertFalse(AppleRecordCrypto.constantTimeEqual(value[...], Array(value.dropLast())))
+		XCTAssertFalse(AppleRecordCrypto.constantTimeEqual(value.dropLast(), value))
+		// A slice that does not start at index 0.
+		XCTAssertTrue(AppleRecordCrypto.constantTimeEqual(([0xff] + value)[1...], value))
 	}
 }
 
@@ -252,11 +326,13 @@ final class AppleRecordLayerRekeyTests: XCTestCase {
 		for backend in backends {
 			let connection = MemoryConnection(incoming: prelude + rekeyUpdate() + [0xee], chunk: 3)
 
-			let rekey = try await VNCConnection.receiveAppleRekey(connection: connection,
-																  wrapKey: bytes(Vectors.wrapKey),
-																  backend: backend)
+			let arrival = try await VNCConnection.receiveAppleRekey(connection: connection,
+																	wrapKey: bytes(Vectors.wrapKey),
+																	backend: backend)
 
-			XCTAssertEqual(rekey.keys, keys, "\(backend)")
+			XCTAssertEqual(arrival.rekey, .init(generation: 1, keys: keys), "\(backend)")
+			// The MiscStatus in the prelude is command 2: the pasteboard changed.
+			XCTAssertTrue(arrival.isPasteboardChanged, "\(backend)")
 			// Not a byte past the rekey is read.
 			XCTAssertEqual(connection.remaining, 1, "\(backend)")
 		}
@@ -446,24 +522,65 @@ final class AppleRecordLayerOpenerTests: XCTestCase {
 		}
 	}
 
-	func testFillerAndBodyLengthsMustAddUp() {
+	func testMoreFillerThanNeededIsAccepted() throws {
 		for backend in backends {
 			// A valid trailer over a 10-byte body and a whole extra block of filler.
-			assertThrows(.invalidRecordBody(bodyLength: 10, recordLength: 48)) { _ = try openAfterGoodFirst(Vectors.extraFillerBlock, backend: backend) }
+			XCTAssertEqual(try openAfterGoodFirst(Vectors.extraFillerBlock, backend: backend), [UInt8](repeating: 0, count: 10), "\(backend)")
+		}
+	}
+
+	func testABodyLongerThanItsRecordFails() {
+		for backend in backends {
 			// A valid trailer over a body length larger than the record.
 			assertThrows(.invalidRecordBody(bodyLength: 9000, recordLength: 32)) { _ = try openAfterGoodFirst(Vectors.bodyLongerThanRecord, backend: backend) }
 		}
 	}
 
-	func testAnyChangedCiphertextByteFails() {
+	func testABodyOverlappingTheTrailerFails() throws {
+		// The largest body a 32-byte record holds is 10 bytes; 11 would reach into the trailer.
+		for backend in backends {
+			for (bodyLength, accepted) in [(10, true), (11, false)] {
+				let direction = AppleRecordLayer.Direction(keys: keys, backend: backend)
+				var sealing = direction
+				var plaintext = [UInt8(0), UInt8(bodyLength)] + [UInt8](repeating: 0, count: 10)
+				plaintext += AppleRecordCrypto.sha1(prefix: try sealing.takeSequenceNumber(), data: plaintext[...], backend: backend)
+
+				let ciphertext = try sealing.encrypt(plaintext)
+				let opener = AppleRecordLayer.Opener(direction: direction)
+
+				if accepted {
+					XCTAssertEqual(try opener.open(ciphertext).count, bodyLength, "\(backend)")
+				} else {
+					assertThrows(.invalidRecordBody(bodyLength: bodyLength, recordLength: 32)) { _ = try opener.open(ciphertext) }
+				}
+			}
+		}
+	}
+
+	/// An opener that has taken client records 0 and 1, ready for record 2.
+	private func openerBeforeClientRecord2(_ backend: AppleRecordCrypto.Backend) throws -> AppleRecordLayer.Opener {
+		let opener = opener(backend)
+
+		_ = try opener.open(Array(bytes(Vectors.clientRecord0).dropFirst(2)))
+		_ = try opener.open(Array(bytes(Vectors.clientRecord1).dropFirst(2)))
+
+		return opener
+	}
+
+	func testAnyChangedCiphertextByteFails() throws {
 		let record = Array(bytes(Vectors.clientRecord2).dropFirst(2))
 
 		for backend in backends {
+			// Unchanged, it opens.
+			XCTAssertEqual(try openerBeforeClientRecord2(backend).open(record), bytes(Vectors.clientMessage2), "\(backend)")
+
 			for index in record.indices {
 				var damaged = record
 				damaged[index] ^= 0x01
 
-				assertThrows(.integrityCheckFailed(sequenceNumber: 0)) { _ = try opener(backend).open(damaged) }
+				let opener = try openerBeforeClientRecord2(backend)
+
+				assertThrows(.integrityCheckFailed(sequenceNumber: 2)) { _ = try opener.open(damaged) }
 			}
 		}
 	}
@@ -491,16 +608,20 @@ final class AppleRecordLayerOpenerTests: XCTestCase {
 final class AppleRecordLayerConnectionTests: XCTestCase {
 	private let serverBodies = [Vectors.serverBody0, Vectors.serverBody1, Vectors.serverBody2, Vectors.serverBody3].flatMap(bytes)
 
-	private func connection(incoming: [UInt8], chunk: Int = .max) -> AppleRecordLayerNetworkConnection<MemoryConnection> {
-		let connection = AppleRecordLayerNetworkConnection(base: MemoryConnection(incoming: incoming, chunk: chunk))
-		connection.startRecordLayer(keys: keys)
+	private func connection(_ base: MemoryConnection) async -> AppleRecordLayerNetworkConnection<MemoryConnection> {
+		let connection = AppleRecordLayerNetworkConnection(base: base)
+		await connection.startRecordLayer(keys: keys)
 
 		return connection
 	}
 
+	private func connection(incoming: [UInt8], chunk: Int = .max) async -> AppleRecordLayerNetworkConnection<MemoryConnection> {
+		await connection(MemoryConnection(incoming: incoming, chunk: chunk))
+	}
+
 	func testReadsConcatenateBodiesWhateverTheChunks() async throws {
 		for chunk in [1, 3, 16, 33, .max] {
-			let connection = connection(incoming: bytes(Vectors.serverStream), chunk: chunk)
+			let connection = await connection(incoming: bytes(Vectors.serverStream), chunk: chunk)
 
 			// One byte, then the rest: a read never needs to line up with records.
 			let first = try await connection.readUInt8()
@@ -515,13 +636,14 @@ final class AppleRecordLayerConnectionTests: XCTestCase {
 		let connection = AppleRecordLayerNetworkConnection(base: MemoryConnection(incoming: [1, 2, 3]))
 
 		XCTAssertFalse(connection.isRecordLayerActive)
+
 		let clear = try await readAll(connection, count: 3)
 		XCTAssertEqual(clear, [1, 2, 3])
 
 		try await connection.write(data: Data([9, 8]))
 		XCTAssertEqual(connection.base.written, [9, 8])
 
-		connection.startRecordLayer(keys: keys)
+		await connection.startRecordLayer(keys: keys)
 		XCTAssertTrue(connection.isRecordLayerActive)
 
 		try await connection.write(data: Data(bytes(Vectors.clientMessage0)))
@@ -536,14 +658,54 @@ final class AppleRecordLayerConnectionTests: XCTestCase {
 		var wire = bytes(Vectors.serverStream)
 		wire[10] ^= 0x01
 
-		let connection = connection(incoming: wire + bytes(Vectors.serverStream))
+		let connection = await connection(incoming: wire + bytes(Vectors.serverStream))
 
 		await assertThrows(.integrityCheckFailed(sequenceNumber: 0)) { _ = try await connection.readUInt8() }
 		await assertThrows(.failed) { _ = try await connection.readUInt8() }
 	}
 
+	func testABadRecordAlsoStopsWrites() async throws {
+		var wire = bytes(Vectors.serverStream)
+		wire[10] ^= 0x01
+
+		let connection = await connection(incoming: wire)
+
+		await assertThrows(.integrityCheckFailed(sequenceNumber: 0)) { _ = try await connection.readUInt8() }
+		await assertThrows(.failed) { try await connection.write(data: Data(bytes(Vectors.clientMessage1))) }
+		XCTAssertEqual(connection.base.written.count, 0)
+	}
+
+	func testAFailedBaseWriteIsFinal() async throws {
+		let connection = await connection(MemoryConnection(incoming: bytes(Vectors.serverStream), failsFirstWrite: true))
+
+		do {
+			try await connection.write(data: Data([1]))
+			XCTFail("no error")
+		} catch {
+			XCTAssertNil(encryptionError(error), "\(error)")
+		}
+
+		await assertThrows(.failed) { try await connection.write(data: Data([2])) }
+		await assertThrows(.failed) { _ = try await connection.readUInt8() }
+		XCTAssertEqual(connection.base.written.count, 0)
+	}
+
+	func testDecryptedBytesDoNotEscapeAfterAFailure() async throws {
+		// Record 0 (12 bytes) is good, record 1 is damaged; a 13-byte read needs both.
+		let all = records(bytes(Vectors.serverStream))
+		var second = all[1]
+		second[10] ^= 0x01
+
+		let connection = await connection(incoming: all[0] + second)
+
+		await assertThrows(.integrityCheckFailed(sequenceNumber: 1)) {
+			_ = try await connection.read(minimumLength: 13, maximumLength: 13)
+		}
+		await assertThrows(.failed) { _ = try await connection.readUInt8() }
+	}
+
 	func testAnInvalidLengthStopsAllLaterReads() async throws {
-		let connection = connection(incoming: [0x00, 0x11] + [UInt8](repeating: 0, count: 64))
+		let connection = await connection(incoming: [0x00, 0x11] + [UInt8](repeating: 0, count: 64))
 
 		await assertThrows(.invalidRecordLength(length: 17)) { _ = try await connection.readUInt8() }
 		await assertThrows(.failed) { _ = try await connection.readUInt8() }
@@ -552,7 +714,7 @@ final class AppleRecordLayerConnectionTests: XCTestCase {
 	}
 
 	func testAConnectionEndingInsideARecordStopsAllLaterReads() async throws {
-		let connection = connection(incoming: Array(bytes(Vectors.serverStream).prefix(30)))
+		let connection = await connection(incoming: Array(bytes(Vectors.serverStream).prefix(30)))
 
 		do {
 			_ = try await connection.readUInt8()
@@ -565,8 +727,7 @@ final class AppleRecordLayerConnectionTests: XCTestCase {
 	}
 
 	func testConcurrentWritesReachTheWireInSequence() async throws {
-		let connection = AppleRecordLayerNetworkConnection(base: MemoryConnection(yieldsBeforeWriting: true))
-		connection.startRecordLayer(keys: keys)
+		let connection = await connection(MemoryConnection(yieldsBeforeWriting: true))
 
 		// Messages of different sizes, each starting with its number.
 		let messages: [[UInt8]] = (0..<300).map { index in
@@ -591,5 +752,125 @@ final class AppleRecordLayerConnectionTests: XCTestCase {
 
 		XCTAssertEqual(received.count, messages.count)
 		XCTAssertEqual(Set(received.map(hex)), Set(messages.map(hex)))
+	}
+}
+
+// MARK: - Starting encryption
+final class AppleSessionEncryptionStartTests: XCTestCase {
+	private let wrapKey = bytes(Vectors.wrapKey)
+
+	/// A one-rectangle update carrying the oracle's rekey.
+	private let rekeyUpdate = [0x00, 0x00, 0x00, 0x01] + [UInt8](repeating: 0, count: 8) + [0x00, 0x00, 0x04, 0x4f] + bytes(Vectors.rekey)
+
+	private let viewerInfo = hex(Array(AppleClientMessage.viewerInfo.data))
+
+	func testPreludeMessages() {
+		XCTAssertEqual(AppleClientMessage.prelude(pasteboard: false).map { hex(Array($0.data)) },
+					   [viewerInfo, "0a000001"])
+		XCTAssertEqual(AppleClientMessage.prelude(pasteboard: true).map { hex(Array($0.data)) },
+					   [viewerInfo, "0a000001", "1500000100000000"])
+		XCTAssertEqual(AppleClientMessage.setEncryption.map { hex(Array($0.data)) },
+					   ["120000010001000100000001", "1200000200010000"])
+		XCTAssertEqual(viewerInfo.count, 2 * 66)
+	}
+
+	func testWrapKeyIsKeptOnlyWhenEnabledForAnAppleServer() {
+		XCTAssertEqual(VNCConnection.appleRecordLayerWrapKey(wrapKey, isEnabled: true, isAppleServer: true), wrapKey)
+		XCTAssertNil(VNCConnection.appleRecordLayerWrapKey(wrapKey, isEnabled: false, isAppleServer: true))
+		XCTAssertNil(VNCConnection.appleRecordLayerWrapKey(wrapKey, isEnabled: true, isAppleServer: false))
+	}
+
+	func testSendsThePreludeInTheClearThenStartsTheRecordLayer() async throws {
+		for pasteboard in [false, true] {
+			for backend in backends {
+				let connection = AppleRecordLayerNetworkConnection(base: MemoryConnection(incoming: [0x02] + rekeyUpdate))
+				var timedOut = false
+
+				let arrival = try await VNCConnection.startAppleSessionEncryption(connection: connection,
+																				  wrapKey: wrapKey,
+																				  pasteboard: pasteboard,
+																				  timeout: 10,
+																				  onTimeout: { timedOut = true },
+																				  isCancelled: { false },
+																				  backend: backend)
+
+				XCTAssertEqual(arrival.rekey, .init(generation: 1, keys: keys))
+				XCTAssertFalse(arrival.isPasteboardChanged)
+				XCTAssertFalse(timedOut)
+
+				let prelude = (AppleClientMessage.prelude(pasteboard: pasteboard) + AppleClientMessage.setEncryption).flatMap { Array($0.data) }
+
+				XCTAssertEqual(hex(connection.base.written), hex(prelude), "pasteboard \(pasteboard)")
+				XCTAssertTrue(connection.isRecordLayerActive)
+
+				// The next message is a record, the oracle's first.
+				try await connection.write(data: Data(bytes(Vectors.clientMessage0)))
+
+				XCTAssertEqual(hex(Array(connection.base.written.dropFirst(prelude.count))), Vectors.clientRecord0, "\(backend)")
+			}
+		}
+	}
+
+	func testNoRekeyRunsTheTimeout() async {
+		let base = MemoryConnection(waitsAtEnd: true)
+		let connection = AppleRecordLayerNetworkConnection(base: base)
+		let timedOut = expectation(description: "timeout")
+
+		// Without the timeout, nothing would end the wait: end it here so the test fails.
+		let fallback = Task {
+			try await Task.sleep(nanoseconds: 5_000_000_000)
+
+			base.cancel()
+		}
+
+		defer { fallback.cancel() }
+
+		do {
+			_ = try await VNCConnection.startAppleSessionEncryption(connection: connection,
+																	wrapKey: wrapKey,
+																	pasteboard: false,
+																	timeout: 0.05,
+																	onTimeout: {
+																		timedOut.fulfill()
+																		// What VNCConnection does: end the session.
+																		base.cancel()
+																	},
+																	isCancelled: { true })
+			XCTFail("no error")
+		} catch { }
+
+		await fulfillment(of: [timedOut], timeout: 5)
+		XCTAssertFalse(connection.isRecordLayerActive)
+	}
+
+	func testARekeyAfterTheSessionEndedStartsNothing() async {
+		let connection = AppleRecordLayerNetworkConnection(base: MemoryConnection(incoming: rekeyUpdate))
+
+		do {
+			_ = try await VNCConnection.startAppleSessionEncryption(connection: connection,
+																	wrapKey: wrapKey,
+																	pasteboard: false,
+																	timeout: 10,
+																	onTimeout: { },
+																	isCancelled: { true })
+			XCTFail("no error")
+		} catch {
+			guard case VNCError.connection(.cancelled) = error else {
+				return XCTFail("\(error)")
+			}
+		}
+
+		XCTAssertFalse(connection.isRecordLayerActive)
+	}
+
+	func testAPasteboardNoticeBeforeTheRekeyIsKept() async throws {
+		for (command, changed) in [(UInt8(1), false), (2, true)] {
+			let miscStatus: [UInt8] = [0x14, 0x00, 0x00, 0x04, 0x00, 0x01, 0x00, command]
+			let connection = MemoryConnection(incoming: miscStatus + rekeyUpdate)
+
+			let arrival = try await VNCConnection.receiveAppleRekey(connection: connection, wrapKey: wrapKey)
+
+			XCTAssertEqual(arrival.isPasteboardChanged, changed, "command \(command)")
+		}
 	}
 }

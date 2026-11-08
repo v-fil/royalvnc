@@ -41,6 +41,9 @@ public final class VNCConnection: NSObjectOrAnyObject {
 	/// login types are not affected. Set before `connect()`.
 	public var isAppleSessionEncryptionEnabled = true
 
+	/// Seconds an Apple server may take to send its session key once asked.
+	var appleRekeyTimeout = 10.0
+
 #if canImport(ObjectiveC)
 	@objc
 #endif
@@ -398,13 +401,19 @@ private extension VNCConnection {
 
 			updateConnectionState(.connected)
 
-			// With session encryption these went out in the clear before it started.
 			if state.isAppleRemoteDesktop,
-			   !connection.isRecordLayerActive,
-			   forwardsServerClipboard || settings.isClipboardRedirectionEnabled {
-				enqueueClientToServerMessage(AppleClientMessage.viewerInfo)
-				enqueueClientToServerMessage(AppleClientMessage.setModeControl)
-				enqueueClientToServerMessage(AppleClientMessage.autoPasteboardStart)
+			   wantsApplePasteboard {
+				if !connection.isRecordLayerActive {
+					for message in AppleClientMessage.prelude(pasteboard: true) {
+						enqueueClientToServerMessage(message)
+					}
+				} else if state.isApplePasteboardChangedBeforeRekey {
+					// The prelude went out before encryption started; a change notice that came
+					// before the key is answered now.
+					state.isApplePasteboardFetchPending = true
+
+					enqueueClientToServerMessage(AppleClientMessage.pasteboardFetch)
+				}
 			}
 
 			startReceiveLoop()

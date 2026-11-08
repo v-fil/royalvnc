@@ -5,7 +5,7 @@ import Foundation
 #endif
 
 // MARK: - CryptoSwift Implementation
-@_implementationOnly import CryptoSwift
+internal import CryptoSwift
 @_implementationOnly import CModExp
 
 final class BigNum {

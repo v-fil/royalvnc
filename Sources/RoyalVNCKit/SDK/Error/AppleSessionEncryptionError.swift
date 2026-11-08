@@ -28,7 +28,7 @@ public extension VNCError {
 		/// A record failed its integrity check: damaged, replayed, reordered or out of step.
 		case integrityCheckFailed(sequenceNumber: UInt32)
 
-		/// A record's body and filler do not add up to its length.
+		/// A record's body runs past the bytes its trailer covers.
 		case invalidRecordBody(bodyLength: Int, recordLength: Int)
 
 		/// The record counter of one direction would wrap around.

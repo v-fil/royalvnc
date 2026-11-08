@@ -188,10 +188,9 @@ private extension VNCConnection {
 		let wrapKey = try await auth.send(connection: connection,
 										  credential: credential)
 
-		if isAppleSessionEncryptionEnabled,
-		   state.isAppleRemoteDesktop {
-			state.appleRecordLayerWrapKey = wrapKey
-		}
+		state.appleRecordLayerWrapKey = Self.appleRecordLayerWrapKey(wrapKey,
+																	 isEnabled: isAppleSessionEncryptionEnabled,
+																	 isAppleServer: state.isAppleRemoteDesktop)
 	}
 
 	func performUltraVNCMSLogonIIAuthentication() async throws {

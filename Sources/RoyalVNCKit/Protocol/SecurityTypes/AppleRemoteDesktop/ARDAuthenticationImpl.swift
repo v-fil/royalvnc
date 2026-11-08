@@ -28,7 +28,7 @@ extension VNCProtocol.ARDAuthentication {
               username: String,
               password: String) {
             // Get MD5 hash of shared secret
-			let secretHash = Data(AppleRecordLayer.wrapKey(diffieHellmanSharedSecret: agreement.secretKey))
+			let secretHash = AppleRecordLayer.wrapKey(diffieHellmanSharedSecret: agreement.secretKey)
 
             // ciphertext: AES128(shared, username[64]:password[64])
             let credArraySize = 128
@@ -68,13 +68,13 @@ extension VNCProtocol.ARDAuthentication {
 			creds.replaceSubrange(passwordStart..<passwordStart + passwordBytes.count, with: passwordBytes)
 			creds[passwordStart + passwordBytes.count] = 0
 
-			guard let cipherText = creds.aes128ECBEncrypted(withKey: secretHash) else {
+			guard let cipherText = creds.aes128ECBEncrypted(withKey: Data(secretHash)) else {
 				return nil
 			}
 
             self.init(cipherText: cipherText,
                       publicKey: agreement.publicKey,
-                      recordLayerWrapKey: Array(secretHash))
+                      recordLayerWrapKey: secretHash)
         }
     }
 }

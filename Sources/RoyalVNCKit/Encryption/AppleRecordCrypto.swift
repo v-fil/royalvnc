@@ -8,11 +8,11 @@ import Foundation
 import CommonCrypto
 #endif
 
-@_implementationOnly import CryptoSwift
+internal import CryptoSwift
 
 /// The primitives of Apple's record layer: AES-128 (one block ECB, and CBC over whole blocks)
-/// and SHA-1. Two implementations: CommonCrypto where it exists (hardware AES, fast in debug
-/// builds too), CryptoSwift elsewhere. Both are run against the same vectors in the tests.
+/// and SHA-1. Two implementations: CommonCrypto where it exists, CryptoSwift elsewhere. Both are
+/// run against the same vectors in the tests.
 enum AppleRecordCrypto {
 	enum Backend: CaseIterable {
 		case commonCrypto

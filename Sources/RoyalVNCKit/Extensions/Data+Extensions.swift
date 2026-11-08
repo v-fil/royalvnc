@@ -5,7 +5,7 @@ import Foundation
 #endif
 
 //@_implementationOnly import libtomcrypt
-@_implementationOnly import CryptoSwift
+internal import CryptoSwift
 
 extension Data {
 	mutating func append(_ uint32: UInt32,

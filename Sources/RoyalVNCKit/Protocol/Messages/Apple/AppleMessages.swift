@@ -55,6 +55,18 @@ extension AppleClientMessage {
 	/// rekey is out.
 	static let setEncryptionDecryptReceived = Self(data: .init([0x12, 0, 0, 2, 0, 1, 0, 0]))
 
+	/// The messages that start an Apple session: ViewerInfo, SetMode(control) and, for the
+	/// pasteboard, AutoPasteboard(start). With session encryption they go out in the clear
+	/// before SetEncryption: AutoPasteboard sent inside the record layer turns nothing on.
+	static func prelude(pasteboard: Bool) -> [Self] {
+		pasteboard
+			? [viewerInfo, setModeControl, autoPasteboardStart]
+			: [viewerInfo, setModeControl]
+	}
+
+	/// SetEncryption 1 then 2, sent right after the prelude.
+	static let setEncryption = [setEncryptionRequestRekey, setEncryptionDecryptReceived]
+
 	/// Pasteboard fetch (0x0b): the server answers with pasteboard contents (0x1f).
 	static let pasteboardFetch = Self(data: .init([0x0b, 0, 0, 0, 0, 0, 0, 0]))
 
@@ -238,8 +250,11 @@ extension VNCProtocol {
 		let messageType: UInt8 = Self.messageType
 		let command: UInt16
 
+		/// The command saying the server's pasteboard changed.
+		static let pasteboardChangedCommand: UInt16 = 2
+
 		/// The server's pasteboard changed.
-		var isPasteboardChanged: Bool { command == 2 }
+		var isPasteboardChanged: Bool { command == Self.pasteboardChangedCommand }
 
 		static func receive(connection: NetworkConnectionReading) async throws -> Self {
 			let bytes = try await connection.read(length: 7)

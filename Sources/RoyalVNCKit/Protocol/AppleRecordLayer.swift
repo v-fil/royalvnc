@@ -70,10 +70,17 @@ enum AppleRecordLayer {
 	/// An empty body with its length, filler and trailer.
 	static let minimumRecordLength = recordLength(bodyLength: 0)
 
-	/// The key and IV a rekey installs.
+	/// The key and IV a rekey installs. Swift arrays can't be reliably wiped, so the keys stay in
+	/// memory until it is reused.
 	struct Keys: Equatable {
 		let key: [UInt8]
 		let iv: [UInt8]
+	}
+
+	/// What a rekey carries.
+	struct Rekey: Equatable {
+		let generation: UInt32
+		let keys: Keys
 	}
 
 	/// Filler bytes that round a record's plaintext up to whole blocks.
@@ -105,7 +112,7 @@ enum AppleRecordLayer {
 	/// The generation and keys of a rekey body.
 	static func unwrapRekey(_ body: [UInt8],
 							wrapKey: [UInt8],
-							backend: AppleRecordCrypto.Backend = .preferred) throws -> (generation: UInt32, keys: Keys) {
+							backend: AppleRecordCrypto.Backend = .preferred) throws -> Rekey {
 		let blockSize = AppleRecordCrypto.blockSize
 
 		guard body.count == rekeyLength else {
@@ -120,7 +127,7 @@ enum AppleRecordLayer {
 			throw VNCError.protocol(.appleSessionEncryption(.cipherFailed))
 		}
 
-		return (generation, Keys(key: key, iv: iv))
+		return Rekey(generation: generation, keys: Keys(key: key, iv: iv))
 	}
 }
 
@@ -203,7 +210,8 @@ extension AppleRecordLayer {
 		}
 
 		/// The records carrying one whole message: as many full records as needed, then the
-		/// rest. An empty message is one empty record. After a failure, every call throws.
+		/// rest. An empty message gives one empty record (the connection sends none). After a
+		/// failure, every call throws.
 		func seal(_ message: [UInt8]) throws -> [UInt8] {
 			guard !hasFailed else {
 				throw VNCError.protocol(.appleSessionEncryption(.failed))
@@ -253,8 +261,10 @@ extension AppleRecordLayer {
 
 // MARK: - Opening (server to client)
 extension AppleRecordLayer {
-	/// Decrypts and checks incoming records. Any filler is accepted, but its length must be the
-	/// one the body length gives. After a failure, every call throws. Not thread-safe.
+	/// Decrypts and checks incoming records. The trailer is checked first; then the body must fit
+	/// in the bytes it covers, and whatever follows the body is filler, of any content and
+	/// length (a sender pads to whole blocks; more filler is accepted, as other clients do).
+	/// After a failure, every call throws. Not thread-safe.
 	final class Opener {
 		private var direction: Direction
 		private(set) var hasFailed = false
@@ -265,11 +275,6 @@ extension AppleRecordLayer {
 
 		convenience init(keys: Keys) {
 			self.init(direction: .init(keys: keys))
-		}
-
-		/// Takes nothing more.
-		func fail() {
-			hasFailed = true
 		}
 
 		/// The body of one record, given its ciphertext (the bytes after its length). Nothing
@@ -307,7 +312,7 @@ extension AppleRecordLayer {
 
 			let bodyLength = Int(plaintext[0]) << 8 | Int(plaintext[1])
 
-			guard recordLength(bodyLength: bodyLength) == length else {
+			guard bodyLengthSize + bodyLength <= covered else {
 				throw VNCError.protocol(.appleSessionEncryption(.invalidRecordBody(bodyLength: bodyLength, recordLength: length)))
 			}
 

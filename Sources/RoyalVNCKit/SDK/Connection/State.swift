@@ -31,6 +31,9 @@ extension VNCConnection {
 		/// used.
 		var appleRecordLayerWrapKey: [UInt8]?
 
+		/// A MiscStatus before Apple's rekey said the pasteboard changed. Handshake only.
+		var isApplePasteboardChangedBeforeRekey = false
+
 		/// An Apple pasteboard fetch is outstanding: only its answer is taken.
 		var isApplePasteboardFetchPending = false
 

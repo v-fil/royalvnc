@@ -15,7 +15,7 @@ A maintained fork of the archived upstream. Besides fixes, it adds Apple Screen 
 DES, needed by the VNC password and MS-Logon II logins, is our own C code written from FIPS 46-3 (`Sources/CDES`, MIT), replacing upstream's D3DES, whose VNC changes carried a copyright with no licence. How a VNC password becomes the DES key, and what that means for non-ASCII passwords, is in [USAGE.md](USAGE.md#vnc-password-bytes).
 
 Tests:
-- `swift test`: known-answer tests for the VNC password and MS-Logon II encryption (`Tests/RoyalVNCKitTests`). `Tests/Vectors/gen.c` prints their expected values from other DES implementations (macOS, needs LibVNCServer; build line in the file). Also Apple's record layer: framing, filler, chaining, sequence numbers, the rekey and every failure, against vectors from `Tests/Vectors/apple_record_layer.py`, an oracle on OpenSSL's AES (needs Python's `cryptography`; usage in the file).
+- `swift test`: known-answer tests for the VNC password and MS-Logon II encryption (`Tests/RoyalVNCKitTests`). `Tests/Vectors/gen.c` prints their expected values from other DES implementations (macOS, needs LibVNCServer; build line in the file). Also Apple's record layer: framing, filler, chaining, sequence numbers, the rekey and every failure, against vectors from `Tests/Vectors/apple_record_layer.py`, an oracle on OpenSSL's AES (needs Python's `cryptography`; usage in the file); and the whole client handshake against a scripted server on 127.0.0.1 (Apple platforms).
 - `make -C Tests/CDESTests test`: DES known answers and VNC-convention vectors (C, AddressSanitizer + UBSan).
 - `make -C Tests/CAppleMVSTests test`: the 1011 decoder (C, AddressSanitizer + UBSan).
 
